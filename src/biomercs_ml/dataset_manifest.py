@@ -23,6 +23,21 @@ def create_db(db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(SCHEMA)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(clips)")}
+        if "review_correct" not in columns:
+            conn.execute("ALTER TABLE clips ADD COLUMN review_correct INTEGER")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_review(db_path: Path, clip_id: int, correct: bool) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE clips SET review_correct = ? WHERE id = ?",
+            (1 if correct else 0, clip_id),
+        )
         conn.commit()
     finally:
         conn.close()
