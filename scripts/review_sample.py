@@ -14,6 +14,13 @@ COLUMNS = [
 ]
 
 
+def _close_player() -> None:
+    subprocess.run(
+        ["osascript", "-e", 'tell application "QuickTime Player" to close every document'],
+        capture_output=True,
+    )
+
+
 def main() -> None:
     db_path = Path(sys.argv[1])
     n = int(sys.argv[2]) if len(sys.argv) > 2 else 100
@@ -39,6 +46,7 @@ def main() -> None:
             incorrect += 1
         else:
             skipped += 1
+        _close_player()
 
     reviewed = correct + incorrect
     print(f"\nReviewed {reviewed} clips ({skipped} skipped): {correct} correct, {incorrect} incorrect.")
