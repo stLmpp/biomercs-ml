@@ -11,6 +11,7 @@ class HudSample:
     timer_value_s: float | None
     combo_value: int | None
     confidence: float
+    pickup_popup: bool = False
 
 
 @dataclass

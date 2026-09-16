@@ -99,6 +99,24 @@ def is_valid_hud_frame(
     return score >= config.COMBO_LABEL_MIN_CONFIDENCE, score
 
 
+def is_popup_visible(
+    frame: np.ndarray, popup_label_template: np.ndarray, offset: tuple[int, int] = (0, 0)
+) -> tuple[bool, float]:
+    dx, dy = offset
+    x, y, w, h = config.POPUP_LABEL_ROI
+    crop = frame[y + dy : y + dy + h, x + dx : x + dx + w]
+    resized_template = cv2.resize(popup_label_template, (w, h))
+    result = cv2.matchTemplate(crop, resized_template, cv2.TM_CCOEFF_NORMED)
+    score = float(result[0, 0])
+    return score >= config.POPUP_LABEL_MIN_CONFIDENCE, score
+
+
+def read_popup_ones_digit(
+    frame: np.ndarray, templates: dict[str, np.ndarray], offset: tuple[int, int] = (0, 0)
+) -> tuple[int | None, float]:
+    return read_digit_slots(frame, [config.POPUP_ONES_DIGIT_SLOT], templates, offset)
+
+
 def find_best_offset(
     frame: np.ndarray,
     combo_label_template: np.ndarray,
@@ -175,6 +193,8 @@ def sample_video(
     timer_templates: dict[str, np.ndarray],
     combo_templates: dict[str, np.ndarray],
     combo_label_template: np.ndarray,
+    popup_digit_templates: dict[str, np.ndarray],
+    popup_label_template: np.ndarray,
     interval_s: float = config.SAMPLE_INTERVAL_S,
 ) -> list[HudSample]:
     cap = cv2.VideoCapture(str(video_path))
@@ -227,7 +247,22 @@ def sample_video(
                 session_id += 1
             last_timer_value = timer_value
 
-        samples.append(HudSample(timestamp_s, session_id, timer_value, combo_value, confidence))
+        # Popup presence uses the calibrated offset like the combo-label
+        # validity check above; the ones digit, like the timer/combo
+        # digit slots, does not (see the comment above).
+        popup_visible, _ = _majority_value(
+            [is_popup_visible(f, popup_label_template, offset) for f in burst_frames]
+        )
+        pickup_popup = False
+        if popup_visible:
+            ones_digit, _ = _majority_value(
+                [read_popup_ones_digit(f, popup_digit_templates) for f in burst_frames]
+            )
+            pickup_popup = ones_digit == 0
+
+        samples.append(
+            HudSample(timestamp_s, session_id, timer_value, combo_value, confidence, pickup_popup)
+        )
     cap.release()
 
     return [s for s in samples if s.timer_value_s is not None and s.combo_value is not None]

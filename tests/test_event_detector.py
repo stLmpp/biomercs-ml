@@ -2,9 +2,14 @@ from biomercs_ml import event_detector
 from biomercs_ml.models import HudSample
 
 
-def _sample(t, timer, combo, session_id=0, conf=0.9):
+def _sample(t, timer, combo, session_id=0, conf=0.9, pickup_popup=False):
     return HudSample(
-        timestamp_s=t, session_id=session_id, timer_value_s=timer, combo_value=combo, confidence=conf
+        timestamp_s=t,
+        session_id=session_id,
+        timer_value_s=timer,
+        combo_value=combo,
+        confidence=conf,
+        pickup_popup=pickup_popup,
     )
 
 
@@ -56,4 +61,47 @@ def test_detect_kill_groups_drops_a_rise_that_is_just_recovery_from_a_transient_
         _sample(0.4, 198.0, 18),
     ]
     groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert groups == []
+
+
+def test_detect_kill_groups_drops_a_group_near_a_map_pickup_popup():
+    # A map pickup's timer contribution animates in over several
+    # seconds rather than landing on this group's own tick pair, so
+    # there's no reliable way to split real kill-bonus time from
+    # pickup time -- discard the group instead of mislabeling it.
+    session = [
+        _sample(0.0, 200.0, 5, pickup_popup=True),
+        _sample(0.2, 200.0, 6),
+        _sample(0.4, 210.0, 14),
+    ]
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert groups == []
+
+
+def test_detect_kill_groups_keeps_a_group_far_from_any_pickup_popup():
+    session = [
+        _sample(0.0, 200.0, 5, pickup_popup=True),
+        _sample(20.0, 205.0, 6),
+    ]
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert len(groups) == 1
+
+
+def test_detect_kill_groups_drops_a_group_when_pickup_landed_in_a_different_session():
+    # Real footage: severe digit misreads in a chaotic stretch (fast
+    # kill chain + screen-flash) split what should be one session into
+    # several spurious ones, landing a real pickup popup in a different
+    # session bucket than the kill-group it affects. The pickup search
+    # must not be scoped to just this session's samples.
+    pickup_session = [_sample(0.0, 276.0, 39, session_id=88, pickup_popup=True)]
+    affected_session = [
+        _sample(0.6, 274.0, 30, session_id=89),
+        _sample(1.6, 283.0, 39, session_id=89),
+    ]
+    all_samples = pickup_session + affected_session
+
+    groups = event_detector.detect_kill_groups(
+        affected_session, session_id=89, all_samples=all_samples
+    )
+
     assert groups == []

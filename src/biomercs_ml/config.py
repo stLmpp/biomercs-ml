@@ -16,12 +16,24 @@ TIMER_SECONDS_SLOTS = [(605, 93, 40, 76), (635, 93, 40, 76)]
 COMBO_DIGIT_SLOTS = [(916, 113, 34, 46), (948, 113, 34, 46), (980, 113, 34, 46)]
 COMBO_LABEL_ROI = (1015, 113, 110, 46)
 
+# The "+XX sec." popup shown next to the timer for both kill bonuses
+# (always fixed at "+05" by the game itself, regardless of how many
+# simultaneous bonus kills actually happened) and map time-bonus
+# pickups (always +30/+60/+90, i.e. the ones digit is always "0"). We
+# only need the ones digit to tell the two apart -- "5" means an
+# ordinary kill-bonus popup (ignore), "0" means a pickup.
+POPUP_ONES_DIGIT_SLOT = (790, 134, 20, 34)
+POPUP_LABEL_ROI = (813, 132, 64, 38)
+
 TIMER_DIGITS_DIR = "templates/digits_timer"
 COMBO_DIGITS_DIR = "templates/digits_combo"
+POPUP_DIGITS_DIR = "templates/digits_popup"
 COMBO_LABEL_TEMPLATE_PATH = "templates/combo_label.png"
+POPUP_LABEL_TEMPLATE_PATH = "templates/popup_label.png"
 
 DIGIT_MATCH_MIN_CONFIDENCE = 0.6
 COMBO_LABEL_MIN_CONFIDENCE = 0.6
+POPUP_LABEL_MIN_CONFIDENCE = 0.6
 # Real (especially re-encoded/compressed) video can render a digit a
 # few pixels off from its calibrated slot purely from
 # compression/encoding noise, not a real position change. Matching
@@ -70,3 +82,11 @@ LABEL_TOLERANCE_S = 1.0
 
 CLIP_BEFORE_S = 2.0
 CLIP_AFTER_S = 2.0
+
+# A map pickup's timer contribution animates in gradually over several
+# seconds (confirmed on real footage: a ~275s timer took ~15s to fully
+# reflect a pickup collected around 156-161s), not on the single 0.2s
+# tick where the popup itself is visible -- so a kill-group anywhere in
+# this window around a detected pickup popup gets discarded rather than
+# guessing how to split the credit.
+PICKUP_EXCLUSION_WINDOW_S = 5.0

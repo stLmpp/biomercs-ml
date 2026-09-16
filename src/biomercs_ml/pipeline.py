@@ -16,8 +16,17 @@ def run(video_source: str, output_dir: Path, db_path: Path) -> None:
     timer_templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
     combo_templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
     combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
+    popup_digit_templates = hud_reader.load_digit_templates(config.POPUP_DIGITS_DIR)
+    popup_label_template = hud_reader.load_image(config.POPUP_LABEL_TEMPLATE_PATH)
 
-    samples = hud_reader.sample_video(video_path, timer_templates, combo_templates, combo_label_template)
+    samples = hud_reader.sample_video(
+        video_path,
+        timer_templates,
+        combo_templates,
+        combo_label_template,
+        popup_digit_templates,
+        popup_label_template,
+    )
 
     sessions: dict[int, list] = {}
     for sample in samples:
@@ -27,7 +36,7 @@ def run(video_source: str, output_dir: Path, db_path: Path) -> None:
     clips_dir = output_dir / "clips"
 
     for session_id, session_samples in sessions.items():
-        groups = event_detector.detect_kill_groups(session_samples, session_id)
+        groups = event_detector.detect_kill_groups(session_samples, session_id, all_samples=samples)
         for group in groups:
             label = auto_labeler.label_kill_group(group)
             if label is None:
