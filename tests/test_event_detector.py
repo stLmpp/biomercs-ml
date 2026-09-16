@@ -41,3 +41,19 @@ def test_detect_kill_groups_drops_implausibly_large_jumps():
     session = [_sample(0.0, 100.0, 26), _sample(0.2, 99.8, 126)]
     groups = event_detector.detect_kill_groups(session, session_id=0)
     assert groups == []
+
+
+def test_detect_kill_groups_drops_a_rise_that_is_just_recovery_from_a_transient_dip():
+    # Real footage: a transient misread dip (e.g. "18" briefly read as
+    # "10" for a tick, even after hud_reader's per-tick majority vote --
+    # found when the misread streak outlasts the vote burst) is ignored
+    # as a drop, but the very next sample recovering to the true,
+    # unchanged value looks like a real kill group. It isn't: the
+    # sample before the dip already matched the "after" value.
+    session = [
+        _sample(0.0, 198.0, 18),
+        _sample(0.2, 198.0, 10),
+        _sample(0.4, 198.0, 18),
+    ]
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert groups == []
