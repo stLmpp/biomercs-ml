@@ -108,22 +108,26 @@ def sample_video(
         ret, frame = cap.read()
         if not ret:
             break
-        if frame_idx % frame_interval == 0:
-            timestamp_s = frame_idx / fps
-            is_valid, hud_conf = is_valid_hud_frame(frame, combo_label_template)
-            if is_valid:
-                timer_value, timer_conf = read_timer(frame, timer_templates)
-                combo_value, combo_conf = read_combo(frame, combo_templates)
-                confidence = min(hud_conf, timer_conf, combo_conf)
-                if timer_value is not None and last_timer_value is not None:
-                    if is_new_session(last_timer_value, timer_value):
-                        session_id += 1
-                if timer_value is not None:
-                    last_timer_value = timer_value
-                samples.append(
-                    HudSample(timestamp_s, session_id, timer_value, combo_value, confidence)
-                )
         frame_idx += 1
+
+        if (frame_idx - 1) % frame_interval != 0:
+            continue
+
+        timestamp_s = (frame_idx - 1) / fps
+        is_valid, hud_conf = is_valid_hud_frame(frame, combo_label_template)
+        if not is_valid:
+            continue
+
+        timer_value, timer_conf = read_timer(frame, timer_templates)
+        combo_value, combo_conf = read_combo(frame, combo_templates)
+        confidence = min(hud_conf, timer_conf, combo_conf)
+
+        if timer_value is not None:
+            if last_timer_value is not None and is_new_session(last_timer_value, timer_value):
+                session_id += 1
+            last_timer_value = timer_value
+
+        samples.append(HudSample(timestamp_s, session_id, timer_value, combo_value, confidence))
     cap.release()
 
     return [s for s in samples if s.timer_value_s is not None and s.combo_value is not None]
