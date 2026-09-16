@@ -175,8 +175,12 @@ def sample_video(
         if not is_valid:
             continue
 
-        timer_value, timer_conf = read_timer(frame, timer_templates, offset)
-        combo_value, combo_conf = read_combo(frame, combo_templates, offset)
+        # The calibrated offset is derived from (and only applied to) the
+        # combo-label validity check above -- digit slots are calibrated
+        # independently and reading them at that same offset can break
+        # otherwise-correct matches (see test_hud_reader_video.py).
+        timer_value, timer_conf = read_timer(frame, timer_templates)
+        combo_value, combo_conf = read_combo(frame, combo_templates)
         confidence = min(hud_conf, timer_conf, combo_conf)
 
         if timer_value is not None:
