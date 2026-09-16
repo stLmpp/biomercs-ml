@@ -27,7 +27,7 @@ via `subprocess`) for clip cutting; `yt-dlp` for YouTube downloads;
 - No per-enemy attribution inside `mixed` groups — group-level label only (spec: "Label taxonomy").
 - Model training is out of scope for this plan (spec: "Goal of this sub-project").
 - Sampling interval starts at 0.2s; clip window is 2s before to 2s after the event timestamp (spec: stages 1 and 4).
-- All ROI pixel coordinates in this plan are calibrated against `tests/fixtures/frames/sample_frame_01.png` (2000x1145) and **must be recalibrated** (same process as Task 2) if source footage has a different resolution or HUD layout.
+- All ROI pixel coordinates in this plan are calibrated against `tests/fixtures/frames/sample_frame_01.png` (1280x720) and **must be recalibrated** (same process as Task 2) if source footage has a different resolution or HUD layout.
 
 ---
 
@@ -71,20 +71,20 @@ uv add --dev pytest
 """Tunable constants for the HUD-reading pipeline.
 
 All pixel coordinates below were calibrated against
-tests/fixtures/frames/sample_frame_01.png at 2000x1145 resolution, using
+tests/fixtures/frames/sample_frame_01.png at 1280x720 resolution, using
 the crop recipe documented in Task 2 of
 docs/superpowers/plans/2026-09-16-kill-labeling-pipeline.md. Recalibrate
 every ROI/slot value here if source footage has a different resolution
 or HUD layout.
 """
 
-REFERENCE_RESOLUTION = (2000, 1145)  # (width, height)
+REFERENCE_RESOLUTION = (1280, 720)  # (width, height)
 
 # Each slot/ROI below is (x, y, width, height) in pixels.
-TIMER_MINUTES_SLOTS = [(790, 155, 55, 115), (845, 155, 55, 115)]
-TIMER_SECONDS_SLOTS = [(935, 155, 55, 115), (990, 155, 55, 115)]
-COMBO_DIGIT_SLOTS = [(1400, 175, 63, 100), (1463, 175, 63, 100), (1526, 175, 63, 100)]
-COMBO_LABEL_ROI = (1585, 180, 330, 90)
+TIMER_MINUTES_SLOTS = [(525, 93, 40, 76), (555, 93, 40, 76)]
+TIMER_SECONDS_SLOTS = [(605, 93, 40, 76), (635, 93, 40, 76)]
+COMBO_DIGIT_SLOTS = [(916, 113, 34, 46), (948, 113, 34, 46), (980, 113, 34, 46)]
+COMBO_LABEL_ROI = (1015, 113, 110, 46)
 
 TIMER_DIGITS_DIR = "templates/digits_timer"
 COMBO_DIGITS_DIR = "templates/digits_combo"
@@ -166,10 +166,10 @@ def test_slot_counts_match_expected_digit_counts():
 def test_all_slots_are_same_size_within_their_field():
     timer_slots = config.TIMER_MINUTES_SLOTS + config.TIMER_SECONDS_SLOTS
     timer_sizes = {(w, h) for _, _, w, h in timer_slots}
-    assert timer_sizes == {(55, 115)}
+    assert timer_sizes == {(40, 76)}
 
     combo_sizes = {(w, h) for _, _, w, h in config.COMBO_DIGIT_SLOTS}
-    assert combo_sizes == {(63, 100)}
+    assert combo_sizes == {(34, 46)}
 ```
 
 Run: `uv run pytest tests/test_config.py -v`
@@ -187,15 +187,17 @@ git commit -m "Scaffold biomercs-ml project with config and models"
 ### Task 2: Finish the digit template set
 
 **Context:** Task 1's calibration already produced real, working
-templates for some digits (from `tests/fixtures/frames/sample_frame_01.png`):
-timer digits `0, 1, 3, 9` in `templates/digits_timer/`, and combo digits
-`0, 2, 3` in `templates/digits_combo/`. The remaining digits need to come
-from other real frames in your own footage — this task can't be
-completed without you supplying at least one frame per missing digit.
+templates for most digits, sourced from three real frames
+(`tests/fixtures/frames/sample_frame_01.png`, `sample_frame_02.png`,
+`sample_frame_03.png`): timer digits `0, 1, 2, 3, 5, 8` in
+`templates/digits_timer/`, and combo digits `0, 3, 5, 7` in
+`templates/digits_combo/`. The remaining digits need to come from other
+real frames in your own footage — this task can't be completed without
+you supplying at least one frame per missing digit.
 
 **Files:**
-- Modify: `templates/digits_timer/` (add `2.png, 4.png, 5.png, 6.png, 7.png, 8.png`)
-- Modify: `templates/digits_combo/` (add `1.png, 4.png, 5.png, 6.png, 7.png, 8.png, 9.png`)
+- Modify: `templates/digits_timer/` (add `4.png, 6.png, 7.png, 9.png`)
+- Modify: `templates/digits_combo/` (add `1.png, 2.png, 4.png, 6.png, 8.png, 9.png`)
 - Create: `tests/test_templates_complete.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -224,7 +226,7 @@ def test_combo_digit_templates_complete():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_templates_complete.py -v`
-Expected: FAIL — both tests report missing digits (timer missing `2,4,5,6,7,8`; combo missing `1,4,5,6,7,8,9`).
+Expected: FAIL — both tests report missing digits (timer missing `4,6,7,9`; combo missing `1,2,4,6,8,9`).
 
 - [ ] **Step 3: Capture the missing digits from your own footage**
 
@@ -237,13 +239,13 @@ calibration. Reusable recipe (replace `INPUT.mp4` and `TIMESTAMP`):
 # 1. Extract a still frame at a timestamp where the digit you need is visible
 ffmpeg -y -ss TIMESTAMP -i INPUT.mp4 -frames:v 1 /tmp/frame.png
 
-# 2. If the frame's resolution isn't 2000x1145, scale it to match first —
+# 2. If the frame's resolution isn't 1280x720, scale it to match first —
 #    otherwise the slot coordinates below won't line up:
-ffmpeg -y -i /tmp/frame.png -vf "scale=2000:1145" /tmp/frame_scaled.png
+ffmpeg -y -i /tmp/frame.png -vf "scale=1280:720" /tmp/frame_scaled.png
 
 # 3. Crop the specific digit slot you need. Example: timer minutes,
-#    first digit (x=790, y=155, w=55, h=115):
-ffmpeg -y -i /tmp/frame_scaled.png -vf "crop=55:115:790:155" /tmp/digit.png
+#    first digit (x=525, y=93, w=40, h=76):
+ffmpeg -y -i /tmp/frame_scaled.png -vf "crop=40:76:525:93" /tmp/digit.png
 
 # 4. Look at /tmp/digit.png, confirm which digit it shows, then save it
 #    under the correct name, e.g.:
@@ -251,9 +253,9 @@ cp /tmp/digit.png templates/digits_timer/4.png
 ```
 
 Slot coordinates to use for step 3, per field (from `biomercs_ml/config.py`):
-- Timer minutes: `(790,155,55,115)` or `(845,155,55,115)`
-- Timer seconds: `(935,155,55,115)` or `(990,155,55,115)`
-- Combo digits: `(1400,175,63,100)`, `(1463,175,63,100)`, or `(1526,175,63,100)`
+- Timer minutes: `(525,93,40,76)` or `(555,93,40,76)`
+- Timer seconds: `(605,93,40,76)` or `(635,93,40,76)`
+- Combo digits: `(916,113,34,46)`, `(948,113,34,46)`, or `(980,113,34,46)`
 
 Repeat until every digit 0-9 has a template in both
 `templates/digits_timer/` and `templates/digits_combo/`.
@@ -313,33 +315,33 @@ def test_match_digit_identifies_correct_digit():
     assert score > config.DIGIT_MATCH_MIN_CONFIDENCE
 
 
-def test_read_digit_slots_reads_timer_minutes_as_03():
+def test_read_digit_slots_reads_timer_minutes_as_02():
     templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
     frame = _load_frame()
     value, confidence = hud_reader.read_digit_slots(
         frame, config.TIMER_MINUTES_SLOTS, templates
     )
-    assert value == 3
+    assert value == 2
     assert confidence > config.DIGIT_MATCH_MIN_CONFIDENCE
 
 
-def test_read_digit_slots_reads_timer_seconds_as_19():
+def test_read_digit_slots_reads_timer_seconds_as_28():
     templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
     frame = _load_frame()
     value, confidence = hud_reader.read_digit_slots(
         frame, config.TIMER_SECONDS_SLOTS, templates
     )
-    assert value == 19
+    assert value == 28
     assert confidence > config.DIGIT_MATCH_MIN_CONFIDENCE
 
 
-def test_read_digit_slots_reads_combo_as_023():
+def test_read_digit_slots_reads_combo_as_003():
     templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
     frame = _load_frame()
     value, confidence = hud_reader.read_digit_slots(
         frame, config.COMBO_DIGIT_SLOTS, templates
     )
-    assert value == 23
+    assert value == 3
     assert confidence > config.DIGIT_MATCH_MIN_CONFIDENCE
 ```
 
@@ -439,19 +441,19 @@ from biomercs_ml import config, hud_reader
 FRAME_PATH = "tests/fixtures/frames/sample_frame_01.png"
 
 
-def test_read_timer_returns_199_seconds():
+def test_read_timer_returns_148_seconds():
     frame = hud_reader.load_image(FRAME_PATH)
     templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
     value, confidence = hud_reader.read_timer(frame, templates)
-    assert value == 3 * 60 + 19
+    assert value == 2 * 60 + 28
     assert confidence > config.DIGIT_MATCH_MIN_CONFIDENCE
 
 
-def test_read_combo_returns_23():
+def test_read_combo_returns_3():
     frame = hud_reader.load_image(FRAME_PATH)
     templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
     value, confidence = hud_reader.read_combo(frame, templates)
-    assert value == 23
+    assert value == 3
     assert confidence > config.DIGIT_MATCH_MIN_CONFIDENCE
 
 
@@ -466,7 +468,7 @@ def test_is_valid_hud_frame_true_on_gameplay_frame():
 def test_is_valid_hud_frame_false_on_blank_frame():
     import numpy as np
 
-    blank = np.zeros((1145, 2000, 3), dtype=np.uint8)
+    blank = np.zeros((720, 1280, 3), dtype=np.uint8)
     combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
     is_valid, _ = hud_reader.is_valid_hud_frame(blank, combo_label_template)
     assert is_valid is False
@@ -564,8 +566,8 @@ def test_sample_video_reads_consistent_samples_from_static_video():
     # session (no timer discontinuity to split on).
     assert 4 <= len(samples) <= 6
     for sample in samples:
-        assert sample.timer_value_s == 199.0
-        assert sample.combo_value == 23
+        assert sample.timer_value_s == 148.0
+        assert sample.combo_value == 3
         assert sample.session_id == 0
 ```
 
