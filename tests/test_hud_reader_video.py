@@ -59,3 +59,31 @@ def test_sample_video_applies_calibrated_offset_only_to_validity_check():
 
     assert mock_combo.call_args_list
     assert not any(_received_fake_offset(call) for call in mock_combo.call_args_list)
+
+
+def test_sample_video_majority_votes_combo_within_each_tick():
+    # A transient single-frame digit misread (e.g. compression noise
+    # flipping "8"->"0" for one frame) landing exactly on the 0.2s
+    # sampling grid creates a phantom combo jump and a fake kill-group
+    # downstream -- found via real downloaded footage. Voting across a
+    # short burst of frames per tick absorbs a lone outlier instead of
+    # trusting a single frame.
+    timer_templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
+    combo_templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+    combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
+
+    true_reading = (3, 0.9)
+    outlier_reading = (10, 0.85)
+    burst_readings = [true_reading] * (config.SAMPLE_VOTE_FRAMES - 1) + [outlier_reading]
+    with (
+        patch("biomercs_ml.hud_reader.is_valid_hud_frame", return_value=(True, 1.0)),
+        patch("biomercs_ml.hud_reader.read_timer", return_value=(148.0, 0.9)),
+        patch("biomercs_ml.hud_reader.read_combo", side_effect=burst_readings * 10),
+    ):
+        samples = hud_reader.sample_video(
+            Path(VIDEO_PATH), timer_templates, combo_templates, combo_label_template
+        )
+
+    assert samples
+    for sample in samples:
+        assert sample.combo_value == 3

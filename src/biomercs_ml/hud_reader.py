@@ -158,6 +158,18 @@ def _calibrate_offset(
     return (0, 0)
 
 
+def _majority_value(
+    readings: list[tuple[int | float | None, float]],
+) -> tuple[int | float | None, float]:
+    valid = [(value, confidence) for value, confidence in readings if value is not None]
+    if not valid:
+        return None, max((confidence for _, confidence in readings), default=0.0)
+    votes = Counter(value for value, _ in valid)
+    winning_value, _ = votes.most_common(1)[0]
+    winning_confidences = [confidence for value, confidence in valid if value == winning_value]
+    return winning_value, max(winning_confidences)
+
+
 def sample_video(
     video_path: Path,
     timer_templates: dict[str, np.ndarray],
@@ -194,8 +206,20 @@ def sample_video(
         # combo-label validity check above -- digit slots are calibrated
         # independently and reading them at that same offset can break
         # otherwise-correct matches (see test_hud_reader_video.py).
-        timer_value, timer_conf = read_timer(frame, timer_templates)
-        combo_value, combo_conf = read_combo(frame, combo_templates)
+        burst_frames = [frame]
+        for _ in range(config.SAMPLE_VOTE_FRAMES - 1):
+            burst_ret, burst_frame = cap.read()
+            if not burst_ret:
+                break
+            burst_frames.append(burst_frame)
+            frame_idx += 1
+
+        timer_value, timer_conf = _majority_value(
+            [read_timer(f, timer_templates) for f in burst_frames]
+        )
+        combo_value, combo_conf = _majority_value(
+            [read_combo(f, combo_templates) for f in burst_frames]
+        )
         confidence = min(hud_conf, timer_conf, combo_conf)
 
         if timer_value is not None:

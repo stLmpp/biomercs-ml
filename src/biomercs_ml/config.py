@@ -57,6 +57,12 @@ CALIBRATION_MIN_VOTES = 3
 # simultaneous kills.
 MAX_PLAUSIBLE_GROUP_SIZE = 20
 
+# A transient single-frame digit misread (e.g. compression noise
+# flipping "8"->"0" for one frame) landing exactly on a sample tick can
+# look like a real combo/timer change -- voting across a short burst of
+# frames per tick absorbs a lone outlier instead of trusting one frame.
+SAMPLE_VOTE_FRAMES = 3
+
 SAMPLE_INTERVAL_S = 0.2
 SESSION_RESET_DROP_S = 1.0
 SESSION_RESET_JUMP_S = 25.0
