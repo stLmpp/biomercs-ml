@@ -57,21 +57,45 @@ spec** — it is a separate, later sub-project once this dataset exists.
   legally-accessible community video library, both already organized by
   character/stage (organization will need review/cleanup as part of this
   work, but a cataloging system is assumed to exist, not built from
-  scratch here).
+  scratch here). Some of this material exists only on YouTube rather
+  than as local files already in hand — see the `downloader` stage below.
 
 ## Pipeline architecture
 
-Five independent stages/scripts, not a monolith — each has one clear input
+Six independent stages/scripts, not a monolith — each has one clear input
 and output and can be run, tested, and understood on its own:
 
 ```
-raw video (.mp4)
+video source (local file, or YouTube URL)
+  → [0] downloader        → raw video (.mp4), if source was a URL
   → [1] hud_reader        → per-sampled-frame (timestamp, timer_value, kill_count, confidence)
   → [2] event_detector    → grouped kill events (timestamp, group_size)
   → [3] auto_labeler      → labeled groups (timestamp, group_size, label)
   → [4] clip_extractor    → short clip file per labeled group
   → [5] dataset_manifest  → SQLite table: one row per labeled clip
 ```
+
+### 0. `downloader`
+
+For videos that live on YouTube rather than as a local file already (the
+"large, legally-accessible community library" mentioned above), fetches
+the video via `yt-dlp` given a URL, at the highest quality available —
+resolution matters here because `hud_reader`'s digit template matching
+depends on it, and `yt-dlp`'s default format selection can pick a
+"good enough" stream rather than the best one if not told otherwise.
+The result is a local `.mp4`, at which point this stage's job is done and
+every later stage treats it identically to a video the author recorded
+and saved directly, with no special-casing downstream.
+
+This stage is a convenience for ingestion, not a bulk-scraping tool: it's
+meant to be pointed at videos one at a time (the author's own uploads, or
+specific videos other players have already granted permission to use),
+not run against arbitrary YouTube search results. Downloading video from
+YouTube sits in a legal gray area under YouTube's own Terms of Service
+regardless of who owns the footage or whether it's publicly viewable;
+this project's use is personal/research and nothing scraped is
+redistributed, but that's a risk-acceptance decision for the author to
+keep making per-video, not something this stage decides on its own.
 
 ### 1. `hud_reader`
 
