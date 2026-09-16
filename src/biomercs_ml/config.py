@@ -23,6 +23,13 @@ COMBO_LABEL_TEMPLATE_PATH = "templates/combo_label.png"
 DIGIT_MATCH_MIN_CONFIDENCE = 0.6
 COMBO_LABEL_MIN_CONFIDENCE = 0.6
 
+# Per-video HUD alignment: some sources (e.g. re-encoded/re-uploaded
+# footage) render the HUD a few pixels off from the reference frames
+# above, even at the same resolution. find_best_offset() searches this
+# radius once per video to compensate.
+OFFSET_SEARCH_RADIUS_PX = 20
+CALIBRATION_MAX_FRAMES = 60
+
 SAMPLE_INTERVAL_S = 0.2
 SESSION_RESET_DROP_S = 1.0
 SESSION_RESET_JUMP_S = 25.0

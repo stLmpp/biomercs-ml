@@ -38,11 +38,13 @@ def read_digit_slots(
     frame: np.ndarray,
     slots: list[tuple[int, int, int, int]],
     templates: dict[str, np.ndarray],
+    offset: tuple[int, int] = (0, 0),
 ) -> tuple[int | None, float]:
+    dx, dy = offset
     digits = []
     confidences = []
     for x, y, w, h in slots:
-        crop = frame[y : y + h, x : x + w]
+        crop = frame[y + dy : y + dy + h, x + dx : x + dx + w]
         digit, score = match_digit(crop, templates)
         digits.append(digit)
         confidences.append(score)
@@ -53,10 +55,10 @@ def read_digit_slots(
 
 
 def read_timer(
-    frame: np.ndarray, templates: dict[str, np.ndarray]
+    frame: np.ndarray, templates: dict[str, np.ndarray], offset: tuple[int, int] = (0, 0)
 ) -> tuple[float | None, float]:
-    minutes, minutes_conf = read_digit_slots(frame, config.TIMER_MINUTES_SLOTS, templates)
-    seconds, seconds_conf = read_digit_slots(frame, config.TIMER_SECONDS_SLOTS, templates)
+    minutes, minutes_conf = read_digit_slots(frame, config.TIMER_MINUTES_SLOTS, templates, offset)
+    seconds, seconds_conf = read_digit_slots(frame, config.TIMER_SECONDS_SLOTS, templates, offset)
     confidence = min(minutes_conf, seconds_conf)
     if minutes is None or seconds is None:
         return None, confidence
@@ -64,20 +66,46 @@ def read_timer(
 
 
 def read_combo(
-    frame: np.ndarray, templates: dict[str, np.ndarray]
+    frame: np.ndarray, templates: dict[str, np.ndarray], offset: tuple[int, int] = (0, 0)
 ) -> tuple[int | None, float]:
-    return read_digit_slots(frame, config.COMBO_DIGIT_SLOTS, templates)
+    return read_digit_slots(frame, config.COMBO_DIGIT_SLOTS, templates, offset)
 
 
 def is_valid_hud_frame(
-    frame: np.ndarray, combo_label_template: np.ndarray
+    frame: np.ndarray, combo_label_template: np.ndarray, offset: tuple[int, int] = (0, 0)
 ) -> tuple[bool, float]:
+    dx, dy = offset
     x, y, w, h = config.COMBO_LABEL_ROI
-    crop = frame[y : y + h, x : x + w]
+    crop = frame[y + dy : y + dy + h, x + dx : x + dx + w]
     resized_template = cv2.resize(combo_label_template, (w, h))
     result = cv2.matchTemplate(crop, resized_template, cv2.TM_CCOEFF_NORMED)
     score = float(result[0, 0])
     return score >= config.COMBO_LABEL_MIN_CONFIDENCE, score
+
+
+def find_best_offset(
+    frame: np.ndarray,
+    combo_label_template: np.ndarray,
+    search_radius_px: int = config.OFFSET_SEARCH_RADIUS_PX,
+) -> tuple[tuple[int, int], float]:
+    base_x, base_y, w, h = config.COMBO_LABEL_ROI
+    resized_template = cv2.resize(combo_label_template, (w, h))
+    frame_h, frame_w = frame.shape[:2]
+
+    best_offset = (0, 0)
+    best_score = -1.0
+    for dy in range(-search_radius_px, search_radius_px + 1):
+        for dx in range(-search_radius_px, search_radius_px + 1):
+            x, y = base_x + dx, base_y + dy
+            if x < 0 or y < 0 or x + w > frame_w or y + h > frame_h:
+                continue
+            crop = frame[y : y + h, x : x + w]
+            result = cv2.matchTemplate(crop, resized_template, cv2.TM_CCOEFF_NORMED)
+            score = float(result[0, 0])
+            if score > best_score:
+                best_score = score
+                best_offset = (dx, dy)
+    return best_offset, best_score
 
 
 def is_new_session(prev_timer_s: float, curr_timer_s: float) -> bool:
@@ -87,6 +115,33 @@ def is_new_session(prev_timer_s: float, curr_timer_s: float) -> bool:
     # stage/round started partway through the recording.
     delta = curr_timer_s - prev_timer_s
     return delta < -config.SESSION_RESET_DROP_S or delta > config.SESSION_RESET_JUMP_S
+
+
+def _calibrate_offset(
+    cap: cv2.VideoCapture,
+    combo_label_template: np.ndarray,
+    frame_interval: int,
+    max_candidates: int = config.CALIBRATION_MAX_FRAMES,
+) -> tuple[int, int]:
+    best_offset = (0, 0)
+    best_score = -1.0
+    frame_idx = 0
+    candidates_tried = 0
+    while candidates_tried < max_candidates:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if frame_idx % frame_interval == 0:
+            offset, score = find_best_offset(frame, combo_label_template)
+            if score > best_score:
+                best_score = score
+                best_offset = offset
+            candidates_tried += 1
+        frame_idx += 1
+
+    if best_score < config.COMBO_LABEL_MIN_CONFIDENCE:
+        return (0, 0)
+    return best_offset
 
 
 def sample_video(
@@ -99,6 +154,9 @@ def sample_video(
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS)
     frame_interval = max(1, round(fps * interval_s))
+
+    offset = _calibrate_offset(cap, combo_label_template, frame_interval)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     samples = []
     session_id = 0
@@ -114,12 +172,12 @@ def sample_video(
             continue
 
         timestamp_s = (frame_idx - 1) / fps
-        is_valid, hud_conf = is_valid_hud_frame(frame, combo_label_template)
+        is_valid, hud_conf = is_valid_hud_frame(frame, combo_label_template, offset)
         if not is_valid:
             continue
 
-        timer_value, timer_conf = read_timer(frame, timer_templates)
-        combo_value, combo_conf = read_combo(frame, combo_templates)
+        timer_value, timer_conf = read_timer(frame, timer_templates, offset)
+        combo_value, combo_conf = read_combo(frame, combo_templates, offset)
         confidence = min(hud_conf, timer_conf, combo_conf)
 
         if timer_value is not None:
