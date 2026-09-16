@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 
 import cv2
@@ -123,8 +124,7 @@ def _calibrate_offset(
     frame_interval: int,
     max_candidates: int = config.CALIBRATION_MAX_FRAMES,
 ) -> tuple[int, int]:
-    best_offset = (0, 0)
-    best_score = -1.0
+    votes: Counter[tuple[int, int]] = Counter()
     frame_idx = 0
     candidates_tried = 0
     while candidates_tried < max_candidates:
@@ -133,15 +133,14 @@ def _calibrate_offset(
             break
         if frame_idx % frame_interval == 0:
             offset, score = find_best_offset(frame, combo_label_template)
-            if score > best_score:
-                best_score = score
-                best_offset = offset
             candidates_tried += 1
+            if score >= config.CALIBRATION_MIN_CONFIDENCE:
+                votes[offset] += 1
+                if votes[offset] >= config.CALIBRATION_MIN_VOTES:
+                    return offset
         frame_idx += 1
 
-    if best_score < config.COMBO_LABEL_MIN_CONFIDENCE:
-        return (0, 0)
-    return best_offset
+    return (0, 0)
 
 
 def sample_video(

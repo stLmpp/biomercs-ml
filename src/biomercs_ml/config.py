@@ -28,7 +28,21 @@ COMBO_LABEL_MIN_CONFIDENCE = 0.6
 # above, even at the same resolution. find_best_offset() searches this
 # radius once per video to compensate.
 OFFSET_SEARCH_RADIUS_PX = 20
-CALIBRATION_MAX_FRAMES = 60
+# Calibration checks many more candidate positions per frame than a
+# normal validity check (a (2*radius+1)^2 grid vs. one fixed ROI), so a
+# frame with no real HUD at all (e.g. a pre-gameplay intro) has a much
+# higher chance of a spurious position clearing the ordinary
+# confidence bar by luck. Require a much stronger match before locking
+# in an offset for the whole video, and scan enough candidates to get
+# past a typical intro before giving up.
+CALIBRATION_MIN_CONFIDENCE = 0.85
+CALIBRATION_MAX_FRAMES = 600
+# A single confident-looking frame isn't enough on its own -- a combo
+# counter's "pop" animation on update can transiently render the label
+# at a different position than its static resting offset. Require the
+# same offset to repeat across this many independent frames before
+# trusting it.
+CALIBRATION_MIN_VOTES = 3
 
 SAMPLE_INTERVAL_S = 0.2
 SESSION_RESET_DROP_S = 1.0
