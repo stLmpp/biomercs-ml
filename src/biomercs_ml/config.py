@@ -22,6 +22,12 @@ COMBO_LABEL_TEMPLATE_PATH = "templates/combo_label.png"
 
 DIGIT_MATCH_MIN_CONFIDENCE = 0.6
 COMBO_LABEL_MIN_CONFIDENCE = 0.6
+# Real (especially re-encoded/compressed) video can render a digit a
+# few pixels off from its calibrated slot purely from
+# compression/encoding noise, not a real position change. Matching
+# against a slightly padded crop (and taking the best-aligned score
+# within it) tolerates this without needing a per-video correction.
+DIGIT_SEARCH_MARGIN_PX = 6
 
 # Per-video HUD alignment: some sources (e.g. re-encoded/re-uploaded
 # footage) render the HUD a few pixels off from the reference frames
@@ -43,6 +49,13 @@ CALIBRATION_MAX_FRAMES = 600
 # same offset to repeat across this many independent frames before
 # trusting it.
 CALIBRATION_MIN_VOTES = 3
+
+# A jump this large between two adjacent samples is definitionally a
+# read error (digit misread, missed session boundary), not a real
+# simultaneous-kill group -- the game's enemy pool per stage is a few
+# hundred at most, and the spec's own examples top out around 3
+# simultaneous kills.
+MAX_PLAUSIBLE_GROUP_SIZE = 20
 
 SAMPLE_INTERVAL_S = 0.2
 SESSION_RESET_DROP_S = 1.0

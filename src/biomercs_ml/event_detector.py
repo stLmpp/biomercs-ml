@@ -1,3 +1,4 @@
+from biomercs_ml import config
 from biomercs_ml.models import HudSample, KillGroup
 
 
@@ -5,7 +6,7 @@ def detect_kill_groups(session_samples: list[HudSample], session_id: int) -> lis
     groups = []
     for prev, curr in zip(session_samples, session_samples[1:]):
         group_size = curr.combo_value - prev.combo_value
-        if group_size > 0:
+        if 0 < group_size <= config.MAX_PLAUSIBLE_GROUP_SIZE:
             groups.append(
                 KillGroup(
                     session_id=session_id,

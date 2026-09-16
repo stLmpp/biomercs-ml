@@ -31,3 +31,13 @@ def test_detect_kill_groups_finds_simultaneous_triple_kill():
     groups = event_detector.detect_kill_groups(session, session_id=0)
     assert len(groups) == 1
     assert groups[0].group_size == 3
+
+
+def test_detect_kill_groups_drops_implausibly_large_jumps():
+    # A single-frame digit misread (e.g. combo momentarily read as 886
+    # instead of 26) can look like a 100-kill group between two
+    # samples -- physically impossible given the game's fixed enemy
+    # pool, so it's a read error, not a real event.
+    session = [_sample(0.0, 100.0, 26), _sample(0.2, 99.8, 126)]
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert groups == []

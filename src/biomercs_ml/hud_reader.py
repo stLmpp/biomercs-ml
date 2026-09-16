@@ -22,13 +22,22 @@ def load_digit_templates(dir_path: str) -> dict[str, np.ndarray]:
     return templates
 
 
-def match_digit(crop: np.ndarray, templates: dict[str, np.ndarray]) -> tuple[str, float]:
+def match_digit(
+    crop: np.ndarray,
+    templates: dict[str, np.ndarray],
+    target_size: tuple[int, int] | None = None,
+) -> tuple[str, float]:
+    target_w, target_h = target_size if target_size is not None else (crop.shape[1], crop.shape[0])
     best_digit = "?"
     best_score = -1.0
     for digit, template in templates.items():
-        resized = cv2.resize(template, (crop.shape[1], crop.shape[0]))
+        resized = cv2.resize(template, (target_w, target_h))
+        # .max() rather than [0, 0]: when crop is padded larger than the
+        # resized template (read_digit_slots' search margin), this finds
+        # the best-aligned position within it; when crop is exactly
+        # target-sized, the result is 1x1 and this is equivalent to [0, 0].
         result = cv2.matchTemplate(crop, resized, cv2.TM_CCOEFF_NORMED)
-        score = float(result[0, 0])
+        score = float(result.max())
         if score > best_score:
             best_score = score
             best_digit = digit
@@ -42,11 +51,17 @@ def read_digit_slots(
     offset: tuple[int, int] = (0, 0),
 ) -> tuple[int | None, float]:
     dx, dy = offset
+    frame_h, frame_w = frame.shape[:2]
+    margin = config.DIGIT_SEARCH_MARGIN_PX
     digits = []
     confidences = []
     for x, y, w, h in slots:
-        crop = frame[y + dy : y + dy + h, x + dx : x + dx + w]
-        digit, score = match_digit(crop, templates)
+        px0 = max(0, x + dx - margin)
+        py0 = max(0, y + dy - margin)
+        px1 = min(frame_w, x + dx + w + margin)
+        py1 = min(frame_h, y + dy + h + margin)
+        crop = frame[py0:py1, px0:px1]
+        digit, score = match_digit(crop, templates, target_size=(w, h))
         digits.append(digit)
         confidences.append(score)
     min_confidence = min(confidences)
