@@ -20,7 +20,11 @@ def main() -> None:
 
     rows = dataset_manifest.fetch_random_sample(db_path, n)
     print(f"Reviewing {len(rows)} clips. Each will open in your default player;")
-    print("note whether the label matches what you see, then close the player to continue.\n")
+    print("watch it, then answer whether the label matches what you saw.\n")
+
+    correct = 0
+    incorrect = 0
+    skipped = 0
 
     for row in rows:
         record = dict(zip(COLUMNS, row))
@@ -28,7 +32,18 @@ def main() -> None:
               f"(bonus={record['n_bonus']}, bullet={record['n_bullet']}) "
               f"confidence={record['confidence']:.2f} clip={record['clip_path']}")
         subprocess.run(["open", record["clip_path"]])
-        input("Press Enter for the next clip...")
+        answer = input("Correct? (y/n, Enter to skip): ").strip().lower()
+        if answer == "y":
+            correct += 1
+        elif answer == "n":
+            incorrect += 1
+        else:
+            skipped += 1
+
+    reviewed = correct + incorrect
+    print(f"\nReviewed {reviewed} clips ({skipped} skipped): {correct} correct, {incorrect} incorrect.")
+    if reviewed:
+        print(f"Agreement: {correct / reviewed:.1%}")
 
 
 if __name__ == "__main__":
