@@ -2,6 +2,45 @@
 
 Paste this whole file as your first message in a new session to continue.
 
+## Status as of 2026-09-17 (read this first, it supersedes the "Open
+## problem" section below for the immediate next step)
+
+The handoff's "concrete lead" (four `n_bullet=10` groups in video 2) has
+been **root-caused, not yet fixed**. Full writeup with evidence:
+`docs/superpowers/DECISIONS.md`, entry "Combo digit '0' losing template
+match to '8'/'9' (fifth root cause)". Short version: the combo digit
+templates `0.png`/`3.png`/`5.png`/`7.png` were captured from a different,
+inconsistent source (a one-off calibration screenshot) than the other
+six (real gameplay footage), and "0" loses template-match confidence to
+"8"/"9" against real footage as a result -- producing phantom ±10 combo
+deltas with no actual timer change.
+
+**Agreed fix (discussed and approved in-chat, not yet implemented):**
+1. Extend the digit-matching architecture from one template image per
+   digit to *multiple* sample images per digit (best score across a
+   digit's own samples wins) -- applied uniformly to all ten digits.
+2. The user is supplying, next session: several high-quality **1280x720
+   PNG** screenshots taken directly in-game across varied HUD
+   backgrounds, the digit's original in-game sprite asset as ground
+   truth, and a couple of crops pulled directly from the already-
+   downloaded YouTube footage.
+3. TDD the multi-sample change against the real bug (video 2 frames at
+   t=399.8/403.4/408.8/414.0s), then populate all ten combo digits, then
+   re-verify the four phantom groups disappear, then re-review video 2.
+
+**Do not re-litigate:** a top-2-confidence-margin heuristic and a
+symmetric event_detector persistence check were both considered and
+rejected in favor of fixing the actual template-quality root cause --
+see DECISIONS.md for why. Don't suggest using a pristine game sprite as
+the sole template source either -- also discussed and rejected (it skips
+the scale/blend/compress pipeline the working templates are consistent
+with); the sprite is a validation reference and one sample among several,
+not a replacement for footage-sourced samples.
+
+This is currently blocked on the user, not on investigation -- if they
+haven't brought screenshots yet, ask for them rather than guessing at a
+codebase-only fix.
+
 ## What this project is
 
 `biomercs-ml` (repo: https://github.com/stLmpp/biomercs-ml, public,

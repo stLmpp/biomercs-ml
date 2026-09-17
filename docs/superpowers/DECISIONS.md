@@ -174,3 +174,105 @@ could ever have caught this.
   drops total clip count on that video from 69 to 46 -- this bug was
   generating far more phantom events than just the one instance caught
   in manual review.
+
+## 2026-09-17 — Combo digit "0" losing template match to "8"/"9" (fifth root cause)
+
+**Problem:** the handoff's "too many bullet kills" lead (four `n_bullet=10`
+groups in video 2, sessions 161/163/166/167, ids 30/31/32/34) traced to a
+new, distinct failure mode -- not digit-margin bleed (fix from
+2026-09-16), not map pickups, not transient noise.
+
+Traced the actual `HudSample` sequences the pipeline produced for all
+four sessions (via `hud_reader.sample_video` re-run + pickled samples,
+see HANDOFF.md for the reproduction recipe). In every case
+`timer_before_s == timer_after_s` exactly (no time passed, so no kill of
+any kind actually happened) and the *only* thing that "changed" between
+adjacent samples was the combo's tens digit flipping between its true
+value and a value 10 away, e.g. `188,188,188,188,198,188` or
+`184,184,184,194,184,184` -- hundreds and ones digits rock solid
+throughout. Pulled the actual frame at one flip (video 2, t=408.8s): it
+plainly reads "105 COMBO" with no occlusion, but the tens-digit crop
+scores 0.55 against its own "0" template while scoring 0.80-0.81 against
+"8"/"9" -- comfortably clearing `DIGIT_MATCH_MIN_CONFIDENCE` (0.6) with
+the wrong digit.
+
+**Root cause, confirmed via `git log --follow` on
+`templates/digits_combo/*.png`:** the ten combo digit templates were
+captured from two different sources in two different commits --
+`0.png`/`3.png`/`5.png`/`7.png` from `f00a365` ("Recalibrate HUD ROIs
+against higher-quality 1280x720 screenshots", the single canonical
+calibration reference frame `sample_frame_01.png`), and
+`1.png`/`2.png`/`4.png`/`6.png`/`8.png`/`9.png` from a later, separate
+commit `0766483` ("Complete digit template sets... cropped from real
+gameplay footage (Wesker STARS run)"). Visually, `0.png` has a dark
+background behind the glyph while `8.png`/`9.png` share the bright
+olive background of real footage -- exactly the digits that lose are
+exactly the ones sourced from the one-off calibration screenshot
+instead of real gameplay video. This is a template *data quality/
+consistency* problem, not a matching-logic bug: `TM_CCOEFF_NORMED`
+correlates pixel patterns, and at a 34x46px crop, the render pipeline
+(scaling + alpha blend + H.264 compression) leaves footage-sourced
+templates looking systematically different from a template pulled from
+one unrelated static screenshot.
+
+- Considered: a top-2-margin ambiguity check in `match_digit`/
+  `read_digit_slots` (reject a match if the winner doesn't clearly beat
+  the runner-up) -- would generalize to any future digit-confusion case
+  and fits the project's existing "drop unreliable data rather than
+  guess" philosophy, but treats the symptom, not the template-quality
+  root cause. Considered: a symmetric persistence check in
+  `event_detector` (extend the existing dip-then-recovery guard to also
+  catch spike-then-revert) -- cheaper, but a third layered heuristic
+  bolted onto `detect_kill_groups`, and doesn't cover session 166's
+  messier case (the "revert" sample is 4s later, past the immediate
+  next tick). Considered: use a pristine digit sprite extracted from the
+  game's own asset files as the template -- rejected as the sole
+  source, because it never goes through the scale/blend/compress
+  pipeline the 6 working footage-sourced templates do, risking swapping
+  one source-inconsistency for a different one.
+- **Chosen (not yet implemented, pending user-supplied screenshots):**
+  recapture `0`/`3`/`5`/`7` from real gameplay, matching how the other
+  six were sourced, **and** extend the template model from one image per
+  digit to *multiple* sample images per digit (`dict[str, list[ndarray]]`,
+  best score across a digit's own samples wins) -- applied uniformly
+  across all ten digits, not special-cased to the four broken ones. The
+  user will supply: several high-quality **1280x720** PNG screenshots
+  taken directly in-game across varied HUD backgrounds (to match
+  `config.REFERENCE_RESOLUTION` and avoid resize-artifact mismatch), plus
+  the digit's original game asset/sprite as a ground-truth reference
+  (used to validate the screenshots are unambiguous, and as one of the
+  sample images) plus a couple of digit crops pulled directly from the
+  already-downloaded YouTube footage (to hedge the templates being
+  cleaner than what real analysis video looks like post-compression).
+- **Not yet implemented.** Blocked on the user capturing the
+  screenshots (next session). When resuming: TDD the multi-sample
+  matching change first against the exact real-footage frames that
+  proved the bug (video 2, t=399.8/403.4/408.8/414.0s -- see
+  `scripts` reproduction recipe below), then populate all ten combo
+  digits' template sets, then re-verify the four phantom
+  `n_bullet=10` groups disappear and re-review video 2.
+
+**Reproduction recipe for a fresh session** (ephemeral files won't
+survive): re-download video 2
+(`https://www.youtube.com/watch?v=u9DA7ueGiH0`, format 298) per the
+"Ephemeral files" section below, then:
+```python
+from pathlib import Path
+from biomercs_ml import config, hud_reader, event_detector
+timer_templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
+combo_templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
+popup_digit_templates = hud_reader.load_digit_templates(config.POPUP_DIGITS_DIR)
+popup_label_template = hud_reader.load_image(config.POPUP_LABEL_TEMPLATE_PATH)
+samples = hud_reader.sample_video(
+    Path("/tmp/biomercs-footage2/source.mp4"), timer_templates, combo_templates,
+    combo_label_template, popup_digit_templates, popup_label_template,
+)
+sessions = {}
+for s in samples:
+    sessions.setdefault(s.session_id, []).append(s)
+for sid in [161, 163, 166, 167]:
+    print(sid, event_detector.detect_kill_groups(sessions[sid], sid, all_samples=samples))
+```
+Each affected session's samples show the tens-digit flip directly (e.g.
+`session_id=161` around t=398-400s reads `181,102,188,188,...,198,188`).
