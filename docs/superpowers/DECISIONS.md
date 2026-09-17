@@ -119,3 +119,58 @@ stretch.
     still there and could affect other things that assume session
     continuity (none currently do, besides this pickup search) --
     worth a dedicated investigation if it turns out to matter more.
+
+## 2026-09-16 — Digit jitter-margin bleeding into neighboring HUD elements
+
+Found on a **second** downloaded video during manual review: a
+menu-open frame with a rock-solid, clearly-legible combo of `149` was
+consistently auto-labeled from a misread of `140`. Root-caused to
+`DIGIT_SEARCH_MARGIN_PX` (added earlier for compression-jitter
+tolerance) reaching past a digit slot's own nominal box far enough to
+match against a *different* real thing next to it, not noise:
+
+- Combo's 3 digit slots are only 32px apart at 34px wide -- already
+  touching/slightly overlapping at baseline, before any margin. My
+  first hypothesis (margin bleeding into the *previous digit slot*)
+  was wrong for this specific case, confirmed by testing left-only vs
+  right-only margin extensions in isolation.
+- The actual cause: the "COMBO" label text sits just 1px after the
+  *last* digit slot. The right-side margin extension reached into it,
+  and something there matched the "0" template better than the true
+  "9" did in its own tight crop. Same class of risk exists for the
+  popup's ones-digit slot (only ~3px from the "sec." label).
+
+This is deterministic (same wrong reading every time this content
+renders), not transient per-frame noise -- majority-voting and the
+event_detector persistence check both operate on the assumption that
+misreads are inconsistent across nearby samples/frames, so neither
+could ever have caught this.
+
+- Considered: recalibrate the slot geometry itself (rejected -- risky
+  change to well-established, calibrated constants for a problem that
+  doesn't require it), reduce `DIGIT_SEARCH_MARGIN_PX` globally
+  (rejected -- would reduce genuine jitter tolerance everywhere to fix
+  a narrow, specific adjacency case). **Chosen:** clamp each slot's
+  margin *extension* (not the slot itself) to the midpoint with its
+  immediate neighbor in the same slot list, and let callers pass an
+  explicit `right_bound` for a non-slot neighbor like a label —
+  applied to `read_combo` (`COMBO_LABEL_ROI`) and
+  `read_popup_ones_digit` (`POPUP_LABEL_ROI`).
+- Never shrink the crop below the slot's own nominal box: an earlier
+  attempt at a strict midpoint clamp broke matching entirely for
+  combo's middle digit, because the available space between its two
+  neighbors' midpoints (32px pitch) is *less* than its own declared
+  width (34px) -- the nominal slots already assume some overlap by
+  necessity. Floor/ceiling every clamp at the nominal box, only ever
+  clamping the extra margin beyond it.
+- **Known follow-on adjustment:** the existing jitter-tolerance test
+  used a synthetic ±4px shift; combo's slots can no longer safely
+  absorb that much *horizontal* jitter between each other (there's no
+  safe margin left once neighbor-bleed is closed off), so the test was
+  reduced to ±2px, which still passes. Real-world compression jitter
+  this fix protects against is expected to be smaller than 4px anyway
+  (per the original fix #5 that introduced the margin).
+- Verified on real footage: eliminates the flagged phantom group and
+  drops total clip count on that video from 69 to 46 -- this bug was
+  generating far more phantom events than just the one instance caught
+  in manual review.
