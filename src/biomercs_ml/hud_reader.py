@@ -49,16 +49,37 @@ def read_digit_slots(
     slots: list[tuple[int, int, int, int]],
     templates: dict[str, np.ndarray],
     offset: tuple[int, int] = (0, 0),
+    right_bound: int | None = None,
 ) -> tuple[int | None, float]:
     dx, dy = offset
     frame_h, frame_w = frame.shape[:2]
     margin = config.DIGIT_SEARCH_MARGIN_PX
+    hard_right_bound = right_bound if right_bound is not None else frame_w
     digits = []
     confidences = []
-    for x, y, w, h in slots:
-        px0 = max(0, x + dx - margin)
+    for i, (x, y, w, h) in enumerate(slots):
+        # Adjacent digit slots (or another HUD element just past the
+        # last one, e.g. the "COMBO" label sitting 1px after combo's
+        # last digit) can sit close enough that the margin below would
+        # otherwise search into that neighbor's ink and match against
+        # it instead. Clamp the margin's *extension* to the midpoint
+        # with each neighboring slot, and to `right_bound` past the
+        # last one, but never shrink past the slot's own nominal box --
+        # that box is exactly the template's target size, so going
+        # smaller than it would break the match outright.
+        nominal_x0, nominal_x1 = x + dx, x + dx + w
+        left_limit = 0
+        if i > 0:
+            prev_x, _, prev_w, _ = slots[i - 1]
+            left_limit = (prev_x + prev_w + x) // 2 + dx
+        right_limit = hard_right_bound
+        if i < len(slots) - 1:
+            next_x, _, _, _ = slots[i + 1]
+            right_limit = min(right_limit, (x + w + next_x) // 2 + dx)
+
+        px0 = min(nominal_x0, max(0, left_limit, nominal_x0 - margin))
+        px1 = max(nominal_x1, min(frame_w, right_limit, nominal_x1 + margin))
         py0 = max(0, y + dy - margin)
-        px1 = min(frame_w, x + dx + w + margin)
         py1 = min(frame_h, y + dy + h + margin)
         crop = frame[py0:py1, px0:px1]
         digit, score = match_digit(crop, templates, target_size=(w, h))
@@ -84,7 +105,16 @@ def read_timer(
 def read_combo(
     frame: np.ndarray, templates: dict[str, np.ndarray], offset: tuple[int, int] = (0, 0)
 ) -> tuple[int | None, float]:
-    return read_digit_slots(frame, config.COMBO_DIGIT_SLOTS, templates, offset)
+    # The "COMBO" label sits immediately after the last digit slot (see
+    # config.COMBO_LABEL_ROI) -- bound the margin there too, not just
+    # between the digit slots themselves.
+    return read_digit_slots(
+        frame,
+        config.COMBO_DIGIT_SLOTS,
+        templates,
+        offset,
+        right_bound=config.COMBO_LABEL_ROI[0] + offset[0],
+    )
 
 
 def is_valid_hud_frame(
@@ -114,7 +144,15 @@ def is_popup_visible(
 def read_popup_ones_digit(
     frame: np.ndarray, templates: dict[str, np.ndarray], offset: tuple[int, int] = (0, 0)
 ) -> tuple[int | None, float]:
-    return read_digit_slots(frame, [config.POPUP_ONES_DIGIT_SLOT], templates, offset)
+    # The "sec." label sits only a few pixels after this digit (see
+    # config.POPUP_LABEL_ROI) -- bound the margin there too.
+    return read_digit_slots(
+        frame,
+        [config.POPUP_ONES_DIGIT_SLOT],
+        templates,
+        offset,
+        right_bound=config.POPUP_LABEL_ROI[0] + offset[0],
+    )
 
 
 def find_best_offset(

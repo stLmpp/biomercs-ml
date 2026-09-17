@@ -63,13 +63,42 @@ def test_read_digit_slots_tolerates_small_pixel_misalignment():
     # against a downloaded YouTube video, where this caused wrong digit
     # reads at otherwise-good confidence. A read within a small margin
     # of the nominal slot should still resolve correctly.
+    #
+    # Combo's slots are only 32px apart at 34px wide (already touching
+    # at baseline), so horizontal tolerance here is necessarily smaller
+    # than the full DIGIT_SEARCH_MARGIN_PX -- read_digit_slots clamps
+    # the margin to never cross into a neighboring slot's ink (see
+    # test_read_digit_slots_does_not_bleed_into_a_neighboring_slots_ink),
+    # which caps how much horizontal jitter these specific slots can
+    # absorb.
     templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
     frame = _load_frame()
-    jittered = np.roll(frame, shift=(3, 4), axis=(0, 1))
+    jittered = np.roll(frame, shift=(3, 2), axis=(0, 1))
 
     value, confidence = hud_reader.read_digit_slots(
         jittered, config.COMBO_DIGIT_SLOTS, templates
     )
 
     assert value == 3
+    assert confidence > config.DIGIT_MATCH_MIN_CONFIDENCE
+
+
+def test_read_digit_slots_does_not_bleed_into_a_neighboring_slots_ink():
+    # Real footage (a second, different video): a menu-open frame
+    # reading a rock-solid "149" combo was consistently misread as
+    # "140". Root cause: the "COMBO" label sits only 1px after the last
+    # digit slot, and the jitter-tolerance margin's right-side
+    # extension reached into it, matching against something there
+    # better than against the true "9" in its own tight box. This is
+    # deterministic, not transient noise, so majority-voting or
+    # persistence checks can't catch it -- the margin itself must not
+    # cross into a neighboring slot OR a nearby label/element.
+    templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+    frame = hud_reader.load_image(
+        "tests/fixtures/frames/combo_149_adjacent_digit_bleed_frame.png"
+    )
+
+    value, confidence = hud_reader.read_combo(frame, templates)
+
+    assert value == 149
     assert confidence > config.DIGIT_MATCH_MIN_CONFIDENCE
