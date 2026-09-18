@@ -1,4 +1,4 @@
-from biomercs_ml import event_detector
+from biomercs_ml import config, event_detector, hud_reader
 from biomercs_ml.models import HudSample
 
 
@@ -48,6 +48,35 @@ def test_detect_kill_groups_drops_implausibly_large_jumps():
     assert groups == []
 
 
+def test_detect_kill_groups_drops_a_group_larger_than_the_one_in_a_million_ceiling():
+    # Per the author's own top-level competitive experience: 8
+    # simultaneous kills is roughly a one-in-a-million event (rare, but
+    # real); anything above that is not plausible and is a read error.
+    session = [_sample(0.0, 100.0, 26), _sample(0.2, 95.0, 35)]  # +9
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert groups == []
+
+
+def test_detect_kill_groups_keeps_a_group_at_the_one_in_a_million_ceiling():
+    session = [_sample(0.0, 100.0, 26), _sample(0.2, 95.0, 34)]  # +8
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert len(groups) == 1
+
+
+def test_detect_kill_groups_does_not_discount_confidence_for_a_plausible_group_size():
+    session = [_sample(0.0, 100.0, 5, conf=0.8), _sample(0.2, 99.8, 8, conf=0.7)]  # +3
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert groups[0].confidence == 0.7
+
+
+def test_detect_kill_groups_discounts_confidence_for_a_rare_group_size():
+    # 6 simultaneous kills is rare -- the reported confidence should
+    # reflect that prior, not just the raw digit-read confidence.
+    session = [_sample(0.0, 100.0, 5, conf=0.8), _sample(0.2, 95.0, 11, conf=0.8)]  # +6
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert groups[0].confidence == 0.8 * 0.55
+
+
 def test_detect_kill_groups_drops_a_rise_that_is_just_recovery_from_a_transient_dip():
     # Real footage: a transient misread dip (e.g. "18" briefly read as
     # "10" for a tick, even after hud_reader's per-tick majority vote --
@@ -87,6 +116,49 @@ def test_detect_kill_groups_keeps_a_group_far_from_any_pickup_popup():
     assert len(groups) == 1
 
 
+def test_detect_kill_groups_drops_a_rise_that_reverts_back_to_its_pre_rise_value():
+    # Real footage (video 2, ~t=408.8s): the combo tens-digit "0" was
+    # misread as "9" for an entire multi-second overexposed stretch --
+    # long enough to survive both per-tick majority voting and the
+    # transient-dip check above. The observed real sequence read
+    # 184,184,184,194,184,184 with the timer never changing. The combo
+    # counter only ever increases during a session (barring a rare
+    # genuine reset toward zero, not a dip-and-return to the exact same
+    # value) -- a rise that reverts to at or below its pre-rise value
+    # shortly after is a misread, not a real kill. See DECISIONS.md,
+    # "sixth root cause".
+    session = [
+        _sample(0.0, 300.0, 184),
+        _sample(0.2, 300.0, 184),
+        _sample(0.4, 300.0, 190),
+        _sample(4.4, 300.0, 184),
+        _sample(4.6, 300.0, 184),
+    ]
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert groups == []
+
+
+def test_detect_kill_groups_keeps_a_rise_that_is_never_reverted():
+    session = [
+        _sample(0.0, 300.0, 184),
+        _sample(0.2, 295.0, 190),
+        _sample(4.6, 295.0, 190),
+    ]
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert len(groups) == 1
+    assert groups[0].group_size == 6
+
+
+def test_detect_kill_groups_keeps_a_rise_reverted_only_after_the_check_window():
+    session = [
+        _sample(0.0, 300.0, 184),
+        _sample(0.2, 295.0, 190),
+        _sample(20.0, 290.0, 184),  # a real, later, unrelated combo break
+    ]
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert len(groups) == 1
+
+
 def test_detect_kill_groups_drops_a_group_when_pickup_landed_in_a_different_session():
     # Real footage: severe digit misreads in a chaotic stretch (fast
     # kill chain + screen-flash) split what should be one session into
@@ -103,5 +175,33 @@ def test_detect_kill_groups_drops_a_group_when_pickup_landed_in_a_different_sess
     groups = event_detector.detect_kill_groups(
         affected_session, session_id=89, all_samples=all_samples
     )
+
+    assert groups == []
+
+
+def test_detect_kill_groups_drops_a_real_overexposed_frames_misread():
+    # Real footage (video 2, ~t=408.8s): this exact frame is genuinely
+    # overexposed -- the combo tens-digit "0"'s defining feature (a dark
+    # hollow center) is blown out by lighting, not just compressed, so
+    # no template or preprocessing can reliably read it correctly (see
+    # DECISIONS.md, "fifth root cause"). That pixel-level loss is
+    # accepted; what actually protects the dataset is event_detector's
+    # group-size cap and reversion check downstream, which discard the
+    # bogus kill-group regardless of what the digit reader returns for
+    # this frame.
+    templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+    frame = hud_reader.load_image(
+        "tests/fixtures/frames/combo_105_zero_misread_frame.png"
+    )
+    misread_value, _ = hud_reader.read_combo(frame, templates)
+
+    session = [
+        _sample(0.0, 300.0, 105),
+        _sample(0.2, 300.0, 105),
+        _sample(0.4, 300.0, misread_value),
+        _sample(4.4, 300.0, 105),
+        _sample(4.6, 300.0, 105),
+    ]
+    groups = event_detector.detect_kill_groups(session, session_id=0)
 
     assert groups == []

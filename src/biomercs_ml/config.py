@@ -64,10 +64,29 @@ CALIBRATION_MIN_VOTES = 3
 
 # A jump this large between two adjacent samples is definitionally a
 # read error (digit misread, missed session boundary), not a real
-# simultaneous-kill group -- the game's enemy pool per stage is a few
-# hundred at most, and the spec's own examples top out around 3
-# simultaneous kills.
-MAX_PLAUSIBLE_GROUP_SIZE = 20
+# simultaneous-kill group. Per the author's own top-level competitive
+# experience: 8 simultaneous kills is a one-in-a-million-type event
+# (rare, but has happened) -- anything above that is not a plausible
+# real group.
+MAX_PLAUSIBLE_GROUP_SIZE = 8
+
+# A larger simultaneous-kill group is real-world rarer than a small one
+# (per the author's own top-level competitive experience), so a group's
+# reported confidence should reflect that prior on top of its raw
+# digit-read confidence, not just a hard yes/no cutoff at
+# MAX_PLAUSIBLE_GROUP_SIZE. Purely informational today (nothing filters
+# on it automatically) -- it sharpens the signal already shown during
+# manual review.
+GROUP_SIZE_CONFIDENCE_FACTOR: dict[int, float] = {
+    1: 1.0,
+    2: 1.0,
+    3: 1.0,
+    4: 0.9,
+    5: 0.75,
+    6: 0.55,
+    7: 0.35,
+    8: 0.15,
+}
 
 # A transient single-frame digit misread (e.g. compression noise
 # flipping "8"->"0" for one frame) landing exactly on a sample tick can
@@ -90,3 +109,13 @@ CLIP_AFTER_S = 2.0
 # this window around a detected pickup popup gets discarded rather than
 # guessing how to split the credit.
 PICKUP_EXCLUSION_WINDOW_S = 5.0
+
+# The combo counter only ever increases during a session (it can drop
+# to near zero on a rare genuine combo break, but never dips by a small
+# amount and then climbs back to exactly where it was). A rise that
+# reverts to at or below its pre-rise value within this window is a
+# digit misread, not a real kill -- see DECISIONS.md, "sixth root
+# cause" (combo tens-digit misread surviving majority vote across an
+# entire multi-second overexposed stretch). Real footage showed the
+# revert sample landing up to ~4s after the phantom rise.
+COMBO_REVERSION_CHECK_WINDOW_S = 6.0
