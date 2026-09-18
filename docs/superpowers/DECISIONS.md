@@ -800,3 +800,87 @@ variant), 3 are Bug B or a Bug-B variant (t=181.2, t=37.0, t=69.0), 2
 are the new flicker pattern (t=522.0 confirmed, t=549.2 inferred). No
 single fix covers the majority -- all three (or four) real causes need
 addressing to get video 2 close to the spec's >98% target.
+
+## 2026-09-18 (later still) — Bug D fixed (widened majority vote);
+## then a much bigger finding: most combo digits still have only one
+## template sample, and the game has a hard combo ceiling we weren't
+## enforcing
+
+**Bug D fixed first, as planned:** widened `SAMPLE_VOTE_FRAMES` from 3
+to 11. TDD'd against the real t=522.0 per-frame sequence (see
+`test_sample_video_widens_the_vote_when_a_short_burst_picks_the_wrong_
+majority`); 11 is the minimum burst size that flips that real case's
+majority to the true value. This required regenerating
+`tests/fixtures/synthetic_static.mp4` at 60fps (it was 30fps, too low
+for an 11-frame burst to fit within one 0.2s sampling tick without
+overrunning into the next) -- real production footage is already
+60fps, so this also makes the fixture more representative, not just a
+technical workaround.
+
+**Verifying Bug D's fix led to a much bigger finding.** Checking the
+real t=549.2 case (originally guessed to be the same flicker pattern
+as t=522.0) with the new 11-frame vote showed the vote settling
+*consistently* on `148` across 5+ seconds -- not flicker at all, so
+the earlier "likely the same pattern" guess in the previous entry was
+wrong; t=549.2 is actually a Bug-B-style sustained ones-digit "2 read
+as 8" misread (same confusion pair independently found at t=69.0).
+
+While investigating, **the user pointed out that a combo value like
+185 is physically impossible in RE5 Mercenaries** -- the enemy pool is
+fixed at a maximum of 150, so the combo counter can never exceed that
+(see the new "Combo counter maximum" entry in
+`docs/knowledge_base/mercenaries-mechanics.md`). This is a domain fact
+the pipeline never enforced, and checking it against real footage
+exposed something much worse than any of Bugs A-D: at t=124.0s (a
+completely clean, unoccluded, non-chaotic frame -- Wesker standing
+still) the combo plainly reads **"029 COMBO"**, but
+`hud_reader.read_combo` confidently (0.80) misreads it as **"889"**.
+Dumping per-digit match scores for that frame showed why:
+`load_digit_templates(COMBO_DIGITS_DIR)` reports only **1 sample each**
+for digits `1, 2, 4, 6, 8, 9` -- the original multi-sample
+architecture decision (2026-09-17 entries above) explicitly said to
+curate new samples "uniformly across all ten digits, not special-cased
+to the four broken ones," but in practice only `0/3/5/7` (the digits
+originally proven bad) ever got curated. The single old "8" sample
+apparently over-matches broadly (won or nearly won every slot in the
+t=124.0 scores, including slots whose true digit was "0" and "2"), and
+digit "2"'s single sample scored *worst of all ten digits* even
+against its own true crop -- a strong sign that sample itself is a bad
+template, the same class of problem as the original "0" root cause,
+just never caught because 1/2/4/6/8/9 were assumed fine after the
+four-digit fix landed.
+
+**This means a meaningful fraction of this session's Bug
+A/B/C/D-classified "wrong" clips were likely misclassified** -- what
+looked like "chaotic footage causing sustained digit confusion" (Bug
+B) may often just be this same single-bad-sample problem showing up on
+ordinary, non-chaotic frames. The classifications aren't being thrown
+out, but should be treated as provisional until re-checked after
+proper multi-sample curation for the remaining six digits.
+
+**Fixed immediately (TDD, real-footage fixture):**
+`config.MAX_PLAUSIBLE_COMBO_VALUE = 150`; `hud_reader.read_combo` now
+returns `None` (matching the existing invalid-reading convention)
+whenever the three-digit value exceeds it, regardless of confidence.
+New fixture `tests/fixtures/frames/combo_029_misread_as_889_frame.png`
+(the real t=124.0 frame) proves this. As a side effect, this cap also
+now catches the fifth root cause's previously-accepted-as-permanent
+overexposed-frame case (t=408.8s, misread `105 -> 195`, and 195 > 150)
+two layers earlier than the `event_detector` safeguards that were
+built to catch it -- `test_detect_kill_groups_drops_a_real_
+overexposed_frames_misread` was updated to hardcode a misread value
+instead of deriving it from that fixture (since `read_combo` no longer
+returns the misread for that frame at all), keeping the downstream
+defense-in-depth test meaningful on its own.
+
+**Not yet done:** extend the multi-sample template curation to
+`1, 2, 4, 6, 8, 9` the same way `0/3/5/7` were done -- both
+`resources/Steam Screenshots.zip` and
+`resources/21690_20260917222148_1.zip` (both still on disk, gitignored)
+plus the original-texture atlases inside them are still available, so
+this doesn't need new material from the user, just re-running the
+already-documented extraction recipe (see the "2026-09-17 follow-up"
+and "further follow-up" entries above) for the six under-curated
+digits. This is very likely the highest-leverage remaining fix in the
+whole project at this point -- worth doing before trusting any further
+Bug A/B/C/D classification work.

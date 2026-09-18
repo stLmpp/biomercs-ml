@@ -47,34 +47,49 @@ t=492.4`) and nothing else. Tests not yet re-run through the full
 pipeline / re-reviewed end to end this session — see "Start here next
 session" below.
 
-**Bugs A and B are still open, not yet implemented:**
-- **Bug A** (combo-counter ~350ms pop animation vs. the timer's
-  single-frame jump landing in different sample ticks) needs a design
-  decision: how should `detect_kill_groups`/`auto_labeler` search for
-  the timer delta across a small window instead of trusting one
-  adjacent-tick pair. Bigger architectural change than Bug C was.
-- **Bug B** (sustained "8"/"9" hundreds-digit and "5"/"6"/"9"
-  ones-digit misreads under chaotic/motion-blurred combat) needs
-  template curation, same pattern as the already-fixed fifth root
-  cause, not a logic change.
-
 **Re-ran and re-reviewed video 2 with Bug C's fix in place.** 16 fresh
 clips, 9/16 correct (56%). The `t=492.4` phantom is confirmed gone.
-The other 7 of the original 8 wrong clips are still wrong, and
-frame-tracing all of them found the "Bug A vs Bug B" framing was
-itself incomplete — there's a **fourth distinct pattern** (rapid
-frame-to-frame flicker among many values, too fast/noisy for the
-existing 3-frame majority vote to filter, unlike Bug B's one sustained
-wrong value). Full classification of all 8 clips, with evidence, is in
-DECISIONS.md's newest entry. **Nothing further implemented yet** —
-stopped after classifying to get the user's steer on scope, same
-pattern as always.
+Frame-tracing the other 7 wrong clips found a fourth pattern (Bug D:
+rapid frame-to-frame flicker, too fast/noisy for the 3-frame majority
+vote) alongside Bug A and Bug B variants. **Bug D is now fixed**
+(`SAMPLE_VOTE_FRAMES` 3 -> 11, TDD'd against the real t=522.0
+sequence; required regenerating `tests/fixtures/synthetic_static.mp4`
+at 60fps to match real footage). Full classification is in
+DECISIONS.md.
 
-**Start here next session:** no fix chosen yet for Bug A, Bug B, or the
-new flicker pattern — ask the user which to tackle first (or in what
-order), per DECISIONS.md's "Updated tally" at the end of the newest
-entry. Video 1 still hasn't been reviewed with the correction-capable
-script at all.
+**Then a much bigger finding, which supersedes the Bug A/B/C/D framing
+as the top priority:** the user pointed out a combo value of 185 is
+physically impossible (RE5's fixed enemy pool caps combo at 150 —
+now documented in `docs/knowledge_base/mercenaries-mechanics.md`).
+Checking this against real footage found `hud_reader.read_combo`
+confidently misreading a **completely clean, non-chaotic** frame
+("029 COMBO", Wesker standing still) as "889". Root cause: **only
+digits 0/3/5/7 ever got the multi-sample template curation** the
+2026-09-17 architecture decision called for — digits `1, 2, 4, 6, 8,
+9` still have just **one sample each**, and that lone "8" sample
+over-matches broadly even on ordinary frames. **A meaningful fraction
+of this session's Bug A/B/C/D clip classifications may be
+misclassified** as a result — treat them as provisional.
+
+**Fixed immediately:** `config.MAX_PLAUSIBLE_COMBO_VALUE = 150`;
+`read_combo` now returns `None` above it regardless of confidence
+(TDD'd against the real t=124.0 frame, now a checked-in fixture). This
+also incidentally fixes the fifth root cause's previously
+"permanent, accepted" overexposed-frame case one layer earlier.
+
+**Start here next session — this is now the highest-leverage next
+step:** extend multi-sample template curation to digits `1, 2, 4, 6,
+8, 9`, the same way `0/3/5/7` were done. Both screenshot zips (with
+the original-texture atlases) are still on disk under `resources/`
+(gitignored) — **no new material needed from the user**, just re-run
+the already-documented extraction recipe (DECISIONS.md, "2026-09-17
+follow-up" / "further follow-up" entries) for the six under-curated
+digits. Do this *before* trusting or re-investigating any more of the
+Bug A/B/C/D clip classifications — many may turn out to be this same
+single-bad-sample problem in disguise. After curation lands, re-run
+the pipeline on both videos, re-review from scratch, and re-classify
+whatever's still wrong. Video 1 still hasn't been reviewed with the
+correction-capable script at all.
 
 **Gotcha to remember:** `/tmp` output directories are *not* reliably
 cleared within a single ongoing session (only between sessions) —

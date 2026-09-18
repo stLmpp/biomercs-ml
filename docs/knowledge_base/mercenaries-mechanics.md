@@ -68,6 +68,15 @@ It's a variance-management skill, closer to poker than to a rhythm game:
 top players aren't the ones who get luckier stuns, they're the ones whose
 runs degrade the least when a stun fails.
 
+## Combo counter maximum
+
+RE5 Mercenaries has a fixed enemy pool, so the on-screen combo counter
+can never exceed **150** in a single run -- there simply aren't more
+enemies than that to chain a kill-streak through. Any reading above
+150 is guaranteed to be a misread, not a real value, regardless of how
+confident the match looked. `biomercs-ml` enforces this as
+`config.MAX_PLAUSIBLE_COMBO_VALUE` (see DECISIONS.md).
+
 ## Legal combination rules (platform/game/mode/character/stage)
 
 Not every character, stage, or mode is legal in every

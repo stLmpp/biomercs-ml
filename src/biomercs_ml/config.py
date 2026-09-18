@@ -31,6 +31,14 @@ POPUP_DIGITS_DIR = "templates/digits_popup"
 COMBO_LABEL_TEMPLATE_PATH = "templates/combo_label.png"
 POPUP_LABEL_TEMPLATE_PATH = "templates/popup_label.png"
 
+# RE5 Mercenaries' enemy pool is fixed -- per the author's own
+# top-level competitive experience, the combo counter can never exceed
+# 150 in a single run. A reading above this is always a misread, not a
+# real value, regardless of confidence -- see DECISIONS.md, real
+# footage (video 2, t=124.0s) where a clean, unoccluded "029" was
+# confidently misread as "889".
+MAX_PLAUSIBLE_COMBO_VALUE = 150
+
 DIGIT_MATCH_MIN_CONFIDENCE = 0.6
 COMBO_LABEL_MIN_CONFIDENCE = 0.6
 POPUP_LABEL_MIN_CONFIDENCE = 0.6
@@ -92,7 +100,18 @@ GROUP_SIZE_CONFIDENCE_FACTOR: dict[int, float] = {
 # flipping "8"->"0" for one frame) landing exactly on a sample tick can
 # look like a real combo/timer change -- voting across a short burst of
 # frames per tick absorbs a lone outlier instead of trusting one frame.
-SAMPLE_VOTE_FRAMES = 3
+# 3 frames isn't always enough: real footage (video 2, ~t=522.0s) shows
+# heavy motion-blur/particle noise making a digit flicker among several
+# different wrong values almost every frame for under a second, with no
+# single dominant wrong reading -- a 3-frame vote reliably lands on
+# whichever wrong value happens to fill the window, even though the
+# true value is the single most common reading across the full noisy
+# stretch. 11 is the minimum burst size that recovers the true value
+# for that real case (see DECISIONS.md, "Bug D") -- must stay below the
+# per-tick frame count (`round(fps * SAMPLE_INTERVAL_S)`, 12 at the
+# 60fps this project's footage uses so far) or the burst would read
+# into the next tick's window.
+SAMPLE_VOTE_FRAMES = 11
 
 SAMPLE_INTERVAL_S = 0.2
 SESSION_RESET_DROP_S = 1.0

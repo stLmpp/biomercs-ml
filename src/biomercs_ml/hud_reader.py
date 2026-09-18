@@ -113,13 +113,19 @@ def read_combo(
     # The "COMBO" label sits immediately after the last digit slot (see
     # config.COMBO_LABEL_ROI) -- bound the margin there too, not just
     # between the digit slots themselves.
-    return read_digit_slots(
+    value, confidence = read_digit_slots(
         frame,
         config.COMBO_DIGIT_SLOTS,
         templates,
         offset,
         right_bound=config.COMBO_LABEL_ROI[0] + offset[0],
     )
+    # The game's fixed enemy pool means the combo counter can never
+    # exceed config.MAX_PLAUSIBLE_COMBO_VALUE -- a reading above it is
+    # always a misread, no matter how confident the match.
+    if value is not None and value > config.MAX_PLAUSIBLE_COMBO_VALUE:
+        return None, confidence
+    return value, confidence
 
 
 def is_valid_hud_frame(

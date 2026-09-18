@@ -116,6 +116,57 @@ def test_sample_video_majority_votes_combo_within_each_tick():
         assert sample.combo_value == 3
 
 
+def test_sample_video_widens_the_vote_when_a_short_burst_picks_the_wrong_majority():
+    # Real footage (video 2, ~t=522.0s): heavy motion-blur/particle
+    # noise makes the combo's ones digit flicker among several
+    # different wrong values almost every frame for under a second.
+    # The original 3-frame vote reliably lands on a wrong plurality
+    # (frames read 189, 189, 199 -> majority "189"), even though the
+    # true value (185) is the single most common reading across the
+    # full ~11-frame window the noise actually spans -- the vote
+    # window just wasn't wide enough to see that. See DECISIONS.md,
+    # "Bug D". Sequence below is the real per-frame combo readings
+    # starting at the sampling tick, in order.
+    true_reading = (185, 0.78)
+    burst_readings = [
+        (189, 0.785),
+        (189, 0.781),
+        (199, 0.797),
+        (196, 0.814),
+        (195, 0.802),
+        true_reading,
+        (195, 0.753),
+        true_reading,
+        (189, 0.781),
+        true_reading,
+        true_reading,
+    ]
+    timer_templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
+    combo_templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+    combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
+    popup_digit_templates = hud_reader.load_digit_templates(config.POPUP_DIGITS_DIR)
+    popup_label_template = hud_reader.load_image(config.POPUP_LABEL_TEMPLATE_PATH)
+
+    with (
+        patch("biomercs_ml.hud_reader.is_valid_hud_frame", return_value=(True, 1.0)),
+        patch("biomercs_ml.hud_reader.read_timer", return_value=(148.0, 0.9)),
+        patch("biomercs_ml.hud_reader.read_combo", side_effect=burst_readings * 10),
+        patch("biomercs_ml.hud_reader.is_popup_visible", return_value=(False, 1.0)),
+    ):
+        samples = hud_reader.sample_video(
+            Path(VIDEO_PATH),
+            timer_templates,
+            combo_templates,
+            combo_label_template,
+            popup_digit_templates,
+            popup_label_template,
+        )
+
+    assert samples
+    for sample in samples:
+        assert sample.combo_value == 185
+
+
 def test_sample_video_flags_pickup_popup_when_ones_digit_is_zero():
     timer_templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
     combo_templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)

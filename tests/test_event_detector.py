@@ -1,4 +1,4 @@
-from biomercs_ml import config, event_detector, hud_reader
+from biomercs_ml import event_detector
 from biomercs_ml.models import HudSample
 
 
@@ -184,21 +184,20 @@ def test_detect_kill_groups_drops_a_real_overexposed_frames_misread():
     # overexposed -- the combo tens-digit "0"'s defining feature (a dark
     # hollow center) is blown out by lighting, not just compressed, so
     # no template or preprocessing can reliably read it correctly (see
-    # DECISIONS.md, "fifth root cause"). That pixel-level loss is
-    # accepted; what actually protects the dataset is event_detector's
-    # group-size cap and reversion check downstream, which discard the
-    # bogus kill-group regardless of what the digit reader returns for
-    # this frame.
-    templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
-    frame = hud_reader.load_image(
-        "tests/fixtures/frames/combo_105_zero_misread_frame.png"
-    )
-    misread_value, _ = hud_reader.read_combo(frame, templates)
-
+    # DECISIONS.md, "fifth root cause"). This frame's actual misread
+    # (105 -> 195) is now itself caught by
+    # config.MAX_PLAUSIBLE_COMBO_VALUE (195 exceeds the real game's
+    # fixed-enemy-pool maximum of 150), so `hud_reader.sample_video`
+    # would drop this tick's sample entirely before it ever reaches
+    # event_detector -- but keep this as a defense-in-depth test too:
+    # even a misread this large that *did* land under the cap (a
+    # tens-digit "0" reading closer to home, hard-coded here rather
+    # than re-derived from the fixture frame) still gets caught by
+    # event_detector's own group-size cap and reversion check.
     session = [
         _sample(0.0, 300.0, 105),
         _sample(0.2, 300.0, 105),
-        _sample(0.4, 300.0, misread_value),
+        _sample(0.4, 300.0, 145),
         _sample(4.4, 300.0, 105),
         _sample(4.6, 300.0, 105),
     ]

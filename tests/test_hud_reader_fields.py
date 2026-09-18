@@ -19,6 +19,22 @@ def test_read_combo_returns_3():
     assert confidence > config.DIGIT_MATCH_MIN_CONFIDENCE
 
 
+def test_read_combo_rejects_a_value_above_the_real_game_maximum():
+    # RE5 Mercenaries' enemy pool is fixed, so the combo counter can
+    # never exceed it -- per the author's own top-level competitive
+    # experience, 150 is the hard maximum. This isn't just a
+    # theoretical bound: this exact real frame (video 2, t=124.0s)
+    # plainly reads "029 COMBO" with no occlusion or motion blur, but
+    # raw template matching confidently misreads it as "889" -- most
+    # combo digit templates still have only one real-footage sample
+    # each (only 0/3/5/7 were multi-sample curated so far), so a
+    # single bad "8" sample wins broadly. See DECISIONS.md.
+    frame = hud_reader.load_image("tests/fixtures/frames/combo_029_misread_as_889_frame.png")
+    templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+    value, _ = hud_reader.read_combo(frame, templates)
+    assert value is None
+
+
 def test_is_valid_hud_frame_true_on_gameplay_frame():
     frame = hud_reader.load_image(FRAME_PATH)
     combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
