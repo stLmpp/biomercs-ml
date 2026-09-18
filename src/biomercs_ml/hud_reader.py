@@ -27,15 +27,41 @@ def load_digit_templates(dir_path: str) -> dict[str, list[np.ndarray]]:
     return templates
 
 
+def waist_notch_score(crop: np.ndarray) -> float:
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    binary = cv2.threshold(hsv[:, :, 2], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    h = binary.shape[0]
+    top_band = range(0, h // 3)
+    middle_band = range(h // 3, 2 * h // 3)
+    bottom_band = range(2 * h // 3, h)
+
+    def leftmost_ink_positions(rows: range) -> list[int]:
+        positions = []
+        for row in rows:
+            ink = np.where(binary[row] > 0)[0]
+            if len(ink) > 0:
+                positions.append(int(ink[0]))
+        return positions
+
+    top_and_bottom = leftmost_ink_positions(top_band) + leftmost_ink_positions(bottom_band)
+    middle = leftmost_ink_positions(middle_band)
+    if not top_and_bottom or not middle:
+        return 0.0
+    return float(np.mean(middle) - np.mean(top_and_bottom))
+
+
 def match_digit(
     crop: np.ndarray,
     templates: dict[str, list[np.ndarray]],
     target_size: tuple[int, int] | None = None,
+    apply_waist_notch_tiebreak: bool = False,
 ) -> tuple[str, float]:
     target_w, target_h = target_size if target_size is not None else (crop.shape[1], crop.shape[0])
     best_digit = "?"
     best_score = -1.0
+    per_digit_best_score: dict[str, float] = {}
     for digit, samples in templates.items():
+        digit_best_score = -1.0
         for template in samples:
             resized = cv2.resize(template, (target_w, target_h))
             # .max() rather than [0, 0]: when crop is padded larger than the
@@ -46,9 +72,23 @@ def match_digit(
             score = float(result.max())
             # A digit only needs to win with any one of its own samples
             # -- see "fifth root cause" in DECISIONS.md.
-            if score > best_score:
-                best_score = score
-                best_digit = digit
+            if score > digit_best_score:
+                digit_best_score = score
+        per_digit_best_score[digit] = digit_best_score
+        if digit_best_score > best_score:
+            best_score = digit_best_score
+            best_digit = digit
+
+    # Combo-font "3" structurally over-matches "8"/"9" under raw-pixel
+    # correlation (see DECISIONS.md, "fourth root cause" and later
+    # entries) -- a geometric check breaks the tie for this specific,
+    # proven ambiguity only. Confirmed NOT to hold for the timer font,
+    # so this must stay opt-in, never the default -- see config.py,
+    # WAIST_NOTCH_THREE_THRESHOLD.
+    if apply_waist_notch_tiebreak and best_digit in ("8", "9") and "3" in per_digit_best_score:
+        if waist_notch_score(crop) > config.WAIST_NOTCH_THREE_THRESHOLD:
+            return "3", per_digit_best_score["3"]
+
     return best_digit, best_score
 
 
@@ -58,6 +98,7 @@ def read_digit_slots(
     templates: dict[str, np.ndarray],
     offset: tuple[int, int] = (0, 0),
     right_bound: int | None = None,
+    apply_waist_notch_tiebreak: bool = False,
 ) -> tuple[int | None, float]:
     dx, dy = offset
     frame_h, frame_w = frame.shape[:2]
@@ -90,7 +131,9 @@ def read_digit_slots(
         py0 = max(0, y + dy - margin)
         py1 = min(frame_h, y + dy + h + margin)
         crop = frame[py0:py1, px0:px1]
-        digit, score = match_digit(crop, templates, target_size=(w, h))
+        digit, score = match_digit(
+            crop, templates, target_size=(w, h), apply_waist_notch_tiebreak=apply_waist_notch_tiebreak
+        )
         digits.append(digit)
         confidences.append(score)
     min_confidence = min(confidences)
@@ -122,6 +165,7 @@ def read_combo(
         templates,
         offset,
         right_bound=config.COMBO_LABEL_ROI[0] + offset[0],
+        apply_waist_notch_tiebreak=True,
     )
     # The game's fixed enemy pool means the combo counter can never
     # exceed config.MAX_PLAUSIBLE_COMBO_VALUE -- a reading above it is

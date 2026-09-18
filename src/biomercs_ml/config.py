@@ -178,6 +178,20 @@ PICKUP_EXCLUSION_WINDOW_S = 5.0
 # drop/keep signal.
 COMBO_REVERSION_CHECK_WINDOW_S = 6.0
 
+# A digit-shaped concave notch: for each row, the leftmost ink pixel's
+# column position, averaged separately for the crop's middle third vs.
+# its top+bottom thirds (see hud_reader.waist_notch_score). A real "3"
+# has the notch (a positive score); "8"/"9" don't (near-zero or
+# negative). Validated against every combo-font template and several
+# real-footage crops -- real "3" scored 6.92-11.63 (templates) / 8.42
+# (real crop), real "8"/"9" scored -7.0-2.92 (templates and real crops)
+# -- see DECISIONS.md, "the waist-notch feature tested against the
+# timer font...". This threshold sits at the midpoint of that gap.
+# Confirmed NOT to hold for the timer font's different-proportioned
+# digits -- do not reuse this constant or match_digit's
+# apply_waist_notch_tiebreak for timer/popup digit reading.
+WAIST_NOTCH_THREE_THRESHOLD = 5.0
+
 # The combo counter's roll/pop animation takes ~350ms for a single kill
 # but up to ~2s for a fast multi-kill chain (real footage: video 2,
 # t=122.0), while the timer jumps in a single frame -- so the sample

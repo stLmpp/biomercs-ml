@@ -2,16 +2,384 @@
 
 Paste this whole file as your first message in a new session to continue.
 
+## Status as of 2026-09-18 (a sixth session, continued) — the
+## waist-notch tie-breaker **implemented for the combo font, TDD'd (110
+## tests), A/B-verified, and now also user-reviewed: KEEP.** One new
+## clip confirmed correct, one new clip wrong but in the project's
+## already-known "fabricated bullet count" way (not a new failure mode
+## this fix introduced). **Start here next session: pick a lead --
+## either root-cause the dominant fabricated-bullet-count-on-bonus-kill
+## bug (now has one more real data point: video 1, t=520.2,
+## `mixed(1,6)` vs true `(1,0)`), or start a genuinely different
+## feature/model for the still-unfixed timer font's `3`-vs-`8`/`9`
+## confusion (see below). No strong opinion yet, worth a short
+## discussion, same as every other fork in this project** (read this
+## first -- supersedes everything below, including the timer-font
+## section right after, kept for its own detail since the timer font is
+## still closed/unfixed)
+
+**What happened this session, part 2 (after the timer-font section
+below):** the user confirmed the combo font's own waist-notch result
+(validated two sessions ago, not affected by the timer-font failure
+above) -- implemented it as `match_digit(..., apply_waist_notch_tiebreak=True)`,
+scoped to combo only (`read_combo` passes the flag; `read_timer`/
+`read_popup_ones_digit` don't). TDD'd with real footage crops (no
+synthetic digit shapes) -- 8 new tests, 110 total. Full detail:
+`docs/superpowers/DECISIONS.md`, entry "the waist-notch tie-breaker
+implemented for the combo font...".
+
+**Verified via a full real-footage A/B diff on video 1** (stash/run/
+restore/run, diff the `clips` table): clip count unchanged (4 -> 4),
+but 2 of 4 shifted. **Investigated both, not just noted them:**
+- `t=62.2`'s old phantom event disappeared -- confirmed this is the
+  already-documented Bug-B false positive (ground truth: no kill
+  happens there). A genuine improvement.
+- `t=526.2` became two clips (`t=500.6`, `t=520.2`). Frame-traced the
+  raw combo sequence in `t=480-530` (deliberately the exact stretch
+  `SAMPLE_VOTE_FRAMES` was tuned against, "Bug D") to understand why:
+  combo's *tens* digit is genuinely `3` throughout this stretch, so the
+  same fix legitimately stabilizes it there too (not scope creep -- the
+  fix is digit-shape-based, applies to every combo slot by design).
+  Instrumented `match_digit` directly: 104 of 753 calls in this window
+  had their digit flipped by the tiebreak, but only 1 was on the ones
+  digit specifically, and that one's resulting confidence was too low
+  to have passed the read anyway -- ruled out spurious firing under
+  motion blur as the explanation for the big sample-count jump (5 -> 89
+  samples survive the confidence gate in this window now).
+
+**User then reviewed all 4 clips in the `after` manifest**
+(`scripts/review_sample.py /tmp/biomercs-waistnotch-after/manifest.sqlite 4`):
+- `t=500.6` (new): **correct** -- `bonus_kill(1,0)` confirmed.
+- `t=520.2` (new): **wrong** -- `mixed(1,6)` detected, true `(1,0)`.
+  This is the project's dominant, still-unsolved "fabricated bullet
+  count on a real bonus kill" pattern (true `n_bullet=0`), not a new
+  failure mode -- the combo delta itself (131->138) is real (frame-traced
+  above); the bonus/bullet split comes from `auto_labeler`'s
+  timer-based arithmetic, which this session never touched.
+- `t=124.0`/`t=196.2` (both byte-identical before/after, unaffected by
+  this fix): reviewed too -- one wrong (`bonus_kill(2,0)` vs true
+  `(1,0)`, pre-existing), one correct. Unrelated to this session.
+
+**Net: real improvement, not a wash.** Before this fix, `t=480-530`
+produced exactly one (never-reviewed, but necessarily wrong) clip that
+silently merged two separate real bonus kills into one. After: one of
+those two is now correctly, separately detected; the other is captured
+but mislabeled in the same already-known way. **Decision: keep the
+fix.** `t=520.2` is a fresh data point for the fabricated-bullet-count
+investigation (still the single biggest unsolved lever on accuracy
+project-wide), not a reason to revert this session's work.
+
+**What happened earlier this session (the timer font):** picked up the
+previous handoff's exact next step -- test the waist-notch feature (a
+geometric concave-notch signature that cleanly separates `3` from
+`8`/`9` in the *combo* font) against the *timer* font's digits. **It
+doesn't hold.** Full evidence,
+root cause, and the two follow-up variants tried: `docs/superpowers/
+DECISIONS.md`, entry "the waist-notch feature tested against the timer
+font on real footage and found NOT to hold." Short version:
+
+- The lone single-sample timer templates looked promising (`3`: 1.62 vs
+  `8`: -5.17, `9`: -9.72) but that data isn't trustworthy on its own --
+  same class of unreliable single-template data that caused the
+  original digit-`8` root cause.
+- **Pulled and visually confirmed 5 real footage crops** (`3`x2, `8`x1,
+  `9`x2, across 2 videos, saved to `tmp/timer_digit_{3,8,9}_real_*.png`)
+  using monotonically-descending countdown stretches as ground truth,
+  the same rigor as prior sessions' visual-confirmation steps. **Real
+  `3` scores (-3.04, 0.12) directly overlap real `8`'s score (-2.01)**
+  -- no margin, unlike the combo font's clean ~5.7-point gap.
+- **Root-caused why** (not just observed the failure): the timer font's
+  glyph doesn't fill its 40x76 bounding box the way the combo font's
+  tightly-cropped templates do (empty padding top/bottom), so the naive
+  "equal thirds of the box" banding straddles the real notch instead of
+  isolating it -- confirmed via the raw per-row leftmost-ink profile.
+- **Tried two targeted variants, not just the one naive port**:
+  bbox-relative thirds (ink-range-only, not raw-box) and peak-recession
+  instead of average-recession within the middle band. **Neither
+  separated the real crops either.**
+
+**Nothing was integrated -- the tie-breaker plan's own precondition
+("if it holds") was not met, so no code or template changes were made.**
+This closes the waist-notch lead for the timer font specifically (it
+may still hold for the combo font alone, which was never in question
+here and isn't affected by this session's finding).
+
+**Quick orientation if picking this up fresh:** the project's dominant
+remaining bug is a digit `8` that gets confused with `2`/`3`/`9` via
+raw-pixel template matching, in **both** the combo-counter font and the
+timer font (two different visual styles) -- this single weakness
+explains most of the "fabricated bullet count" errors that have shown
+up across every review round this session (14 of 15 wrong clips, see
+below). Four fix attempts already failed (see "four failed attempts"
+section below for full detail) -- **do not re-attempt sample curation
+or binarization alone, both already tried and shown insufficient.**
+The live lead is a new geometric feature (below), not yet finished.
+
+### The 23-clip statistical baseline (from real review data, not
+### assumption)
+
+Pulled every review verdict still cached in this session's manifests
+(`/tmp/biomercs-ab-after{1,2,3}`, `/tmp/biomercs-run4-fixed`,
+`/tmp/biomercs-run5-new` -- all 5 videos, several fix eras, 23 clips
+total). Of 15 wrong clips: **14 have true `n_bullet=0`** (fabricated
+bullet is almost the entire error surface); only 1 has a real
+`n_bullet=1` misclassified the *other* way (bonus mistaken for
+bullet); **2 clips have a genuine `n_bullet=1` and are already
+correctly detected** -- bullet kills aren't impossible, just rare, and
+already handled fine when the read is clean. Full table and per-video
+breakdown: `docs/superpowers/DECISIONS.md`, entry "the timer-cross-check
+idea investigated and found NOT independent...".
+
+### Why "cross-check against the timer" doesn't work (investigated,
+### not assumed)
+
+The timer's own math already computes `n_bonus` independently of the
+combo digit (this already exists in `auto_labeler`) -- the idea was to
+trust that and treat the combo-derived total as suspect when it
+implies an unlikely bullet count. **But checked: of the 15 wrong
+clips, 12 also have the timer-derived `n_bonus` wrong**, not just the
+combo-derived total. Traced two to actual pixels (video5 t=576.0,
+video4 t=522.5) and found the **same digit-`8` confusion also
+corrupting the timer's own reading** (a real "06:43"/403s frame
+misread as "408" in video5; video4's window is far more chaotic,
+combo and timer both unstable together, same underlying weakness).
+**Conclusion: the timer is not an independent signal** -- it's read
+via the same kind of digit-template matching, just a different font,
+and shares the exact same weakness. Don't pursue "timer validates
+combo" further without first fixing the underlying digit-matching
+problem.
+
+**Side finding, not yet acted on:** `templates/digits_timer/*` has
+exactly 1 sample per digit -- it never got the multi-sample curation
+the combo digits got. Worth doing with the same proven methodology
+regardless of the `3`-vs-`8` outcome, but alone won't fix the
+structural confusion (already shown to be more than a coverage gap).
+
+### Domain knowledge gathered from the user this round (now also in
+### `docs/knowledge_base/mercenaries-mechanics.md`)
+
+1. A bullet kill *can* take out multiple enemies at once (shotgun
+   spread, sniper/magnum penetration) -- rare in "good" runs because it
+   hurts score, players often restart if it happens by accident.
+2. Combo only ever increases from a kill, nothing else.
+3. No "silent" time pickup exists -- only map time-items and bonus
+   kills change the clock, both already accounted for in the code.
+4. A genuine bonus+bullet mix in the *same* group is rarer still, and
+   in the user's experience always traces to an external cause
+   (another NPC's molotov/dynamite), not the player's own single
+   action -- useful for telling a real mixed group apart from a
+   misread.
+
+### The new lead: a geometric "waist notch" feature (the user's idea,
+### not mine -- partially validated, not yet finished or integrated)
+
+The user looked at a real `3` that had been misread as `8` next to a
+real `8`, and pointed out the `3` has a visible concave notch on its
+left side around mid-height that the `8` doesn't have. Quantified it:
+per row, find the leftmost ink pixel (on the HSV-Value-binarized
+crop); compare the average leftmost position in the vertical *middle*
+band against the top/bottom bands. **Tested against every combo
+template sample and 10 real-footage crops:** real `3`s measured
+8.65-12.02, real `8`/`9`s measured -0.03 to 2.92 -- a clean ~5.7-point
+margin, no overlap. `2`, `5`, `7` also show some positive
+(concave-left) signature but distinctly smaller than `3`'s. Full
+numbers: DECISIONS.md, same entry as above.
+
+**Not yet done:**
+1. Test this same feature against the **timer font's** digits (visibly
+   different style -- orange, digital-clock look) -- this was the very
+   next step when the session paused for this handoff. If it holds
+   there too, it's likely a genuine font-independent property of how
+   `3` vs `8`/`9` render, not a combo-font coincidence.
+2. If it holds: integrate as a **scoped tie-breaker**, not a blanket
+   filter -- only invoked when raw correlation's top candidate is `8`
+   or `9` and the runner-up is `3` (or vice versa) within some
+   closeness threshold. This is a deliberate lesson from the earlier
+   hole-area-ratio attempt (see "four failed attempts" below), which
+   applied globally and caused its own `2`-vs-`3` collision -- keep
+   this new check narrow, only firing on the specific ambiguity it's
+   proven to resolve.
+3. TDD + full 5-video A/B replay before accepting, same standard as
+   every other fix this project has ever shipped.
+
+**Ephemeral state note:** all of this round's cached data
+(`/tmp/video4_samples.pkl`, `/tmp/video5_samples.pkl`, the manifest
+dirs above, `/tmp/test_waist_notch.py` and friends) will NOT survive a
+new session -- see "Ephemeral files" far below for the video
+download/pipeline-run recipe. The waist-notch test script is short
+(~40 lines, in this handoff's own conversation history) and easy to
+recreate: binarize via HSV-Value+Otsu, then for each row find the
+leftmost lit pixel, compare the vertical-middle band's average against
+top+bottom bands' average.
+
+## Status as of 2026-09-18 (a fifth video, later still) — video5
+## `id=6`'s overcount root-caused (a sustained digit `8`-vs-`2` misread
+## that, via `n_bullet = group_size - n_bonus`, explains the dominant
+## fabricated-bullet-count bug); four independent mitigation attempts
+## failed (raw-BGR sample add, raw-BGR sample removal, binarize +
+## proper re-curation, binarize + upscale) (superseded by the section
+## above -- kept for its own per-clip detail, which the section above
+## didn't repeat)
+
+**Frame-traced video5 `id=6`** (t=576.0, detected group_size 7, true
+1) down to actual pixels: the combo genuinely went `111 -> 112` (one
+real bonus kill, confirmed by a "+05 sec." popup on screen), but
+`hud_reader.read_combo` confidently misread it as `118` and **stayed
+wrong for ~2.5 seconds straight** -- not a one-tick fluke, so none of
+this session's neighbor-clamping fixes (Bug A/C/D, the group_size
+clamps) could ever have caught it. Since `auto_labeler` computes
+`n_bullet = group.group_size - n_bonus` (not independently), this one
+digit misread is *sufficient by itself* to explain the dominant
+"fabricated bullet count on a real bonus kill" pattern that's shown up
+in 7 of the last 8 wrong clips across two review rounds. Root cause:
+digit `8` had only 2 template samples (one blurry, one atlas-sourced,
+never a proper real-footage capture) and one of them scored 0.71
+against this "2" crop, beating all of "2"'s own samples (best 0.51).
+Full detail: `docs/superpowers/DECISIONS.md`, entry "video5 id=6's
+overcount root-caused... this is now an open architectural question".
+
+**The obvious fix -- curate real "8" samples from the already-
+downloaded footage, same method as every prior digit-curation fix --
+was tried, TDD'd, and then reverted after real-footage verification
+showed it net harmful, not just incomplete:**
+- Found and visually confirmed 4 genuine real-footage "8" instances
+  across 4 videos, added them, wrote a failing-then-passing test.
+- First pass broke an existing regression test (`149`->`148`, a new
+  `9`-vs-`8` confusion from one of the new samples) -- fixed by
+  dropping that one sample.
+- **A full 5-video before/after A/B replay (this project's standard
+  verification bar for any event_detector-adjacent change) found 61 of
+  263 overlapping per-tick combo reads changed on video1 alone.**
+  Spot-checked three against actual frame pixels: all three were *new*
+  regressions (true `113`/`119`/`143` now misread as `118`/`118`/`148`
+  -- new `3`-vs-`8` and `9`-vs-`8` confusions), none were corrections
+  of previously-wrong reads.
+- **Reverted all new template samples and the dependent test.** Full
+  suite back to 102 passing, working tree clean except for a kept
+  fixture frame (`tests/fixtures/frames/combo_112_misread_as_118_frame.png`,
+  for whoever picks this up) and this session's doc updates.
+
+**Why sample curation alone can't fix this (confirmed across four
+separate attempts, not assumed):**
+1. Raw-BGR matching + add 4 real "8" samples -> broke an existing
+   regression test (`9`-vs-`8`), fixed by dropping one sample.
+2. Raw-BGR, that reduced set -> full 5-video A/B replay found new
+   `3`-vs-`8`/`9`-vs-`8` regressions elsewhere on video1. Reverted
+   everything.
+3. **Binarize before matching** (HSV Value channel + Otsu threshold --
+   a real, literature-backed technique for exactly this game-HUD-OCR
+   problem, found via web research) **+ properly re-curated real
+   footage for both `8` and `9`** (8 diverse new samples across 4-5
+   videos, all self-identify at 0.92-1.00). This is a genuine partial
+   win -- it fixes the original target case (video5 `id=6`) cleanly,
+   `2` now wins 1.0000 vs `8`'s 0.6671 -- **but all three fresh, clean
+   real "8" samples individually still score 0.73-0.85 against two
+   known `3` crops**, nearly identical to each other. Not one bad
+   sample this time -- every real "8" capture over-matches "3" at this
+   resolution.
+4. **Binarize + 4x upscale before thresholding** (also suggested by
+   the same research, in case 34x46px itself was destroying
+   discriminating detail) -- made things *worse*, broke the
+   already-fixed target case too.
+
+**Conclusion: digit `8`'s shape structurally overlaps with `3` and `9`
+under raw-pixel correlation at this font/resolution, with or without
+binarization or upscaling.** This is not a "find better samples"
+problem any more -- per this project's own debugging discipline, 3+
+failed fix attempts on the same symptom means change the *kind* of
+fix, not iterate again. **No code or template changes were kept --
+working tree only has doc updates and `tmp/` reference images**
+(`combo_digit_templates_binarized_grid.png` and others, useful context
+for whoever picks this up: they show `0/e` is corrupted but empirically
+harmless, and `4/a`/`6/a`/`8/a`/`9/a` share a left-edge crop-bleed
+defect, neither of which is the actual cause of the `3`/`9`/`8`
+confusion found here).
+
+**Start here next session:** needs a real strategy change, not more
+curation. Options, roughly in order of effort:
+1. **Accept as a documented, unfixed limit** (like the earlier t=408.8
+   overexposed-frame case) and move to a different lead instead --
+   video4's undercount (`id=2`, t=490.7), video4's wrong-kind result
+   (`id=5`, t=547.5), or video5's total phantom (`id=3`, t=341.8).
+2. **Cross-check the combo delta against independent evidence** --
+   e.g. the timer's own bonus-jump math or the "+05 sec." popup (which
+   is exactly what let us establish ground truth in this
+   investigation) -- instead of trusting the combo digit read alone.
+   Doesn't need `8` vs `3`/`9` to ever be perfectly disambiguated by
+   pixels; sidesteps the problem instead of solving it head-on.
+3. **A genuinely different feature/model just for the `3`/`8`/`9`
+   family** -- e.g. stroke-width profiling, contour-based shape
+   descriptors (Hu moments), or a small trained classifier -- rather
+   than raw-pixel correlation. Bigger effort, no guarantee it fares
+   better than correlation did.
+4. **A confidence-margin mechanism** (winning digit must beat the
+   runner-up by some margin) -- weakest option now: already looked
+   shaky before this session's evidence, and the new data (three
+   different real "8" samples all scoring within 0.1 of each other
+   against the same wrong crop) suggests the margin would need to be
+   large enough to also reject genuine "8" reads.
+No strong opinion yet on which has the best return -- worth a short
+discussion before picking, same as every other fork in this project.
+
+## Status as of 2026-09-18 (a fifth video, cross-validation) — a fifth
+## video added and reviewed: 2/6 correct, same rate as video4's
+## post-fix round; neither of video4's two new failure modes repeated,
+## but a new total-phantom-event instance appeared (superseded by the
+## section above -- kept for its own per-clip detail, which the
+## section above didn't repeat)
+
+**User reviewed a fifth video's fresh 6-clip set**
+(`https://www.youtube.com/watch?v=HYXLHArtq1I`, format 298,
+1280x720@60fps, added this session purely for more cross-validation
+data after video4's round left no strong signal) -- **2/6 correct
+(33.3%), matching video4's post-fix rate exactly.** Full per-clip
+breakdown: `docs/superpowers/DECISIONS.md`, entry "a fifth video,
+cross-validation". Key results:
+
+- **Neither of video4's two brand-new failure modes repeated.** No
+  undercount this round (video4's `id=2` still the only one
+  project-wide), and no "wrong kind with true n_bullet>0" (video4's
+  `id=5` still the project's only counterexample to the n_bullet=0
+  pattern). Both remain unconfirmed as real patterns vs. one-offs --
+  this round doesn't settle it either way.
+- **The dominant, long-standing bug (fabricated bullet count on a real
+  bonus kill, true n_bullet=0) is still the main story**: 3 of this
+  round's 4 wrong clips fit it exactly (`id=1`, `id=4`, `id=6`).
+  Combined with video4's round, **7 of 8 wrong clips across both
+  post-fix rounds have true n_bullet=0** -- strong, consistent signal,
+  still not root-caused.
+- **New: a total phantom event** (`id=3`, t=341.8: detected
+  `mixed(1,6)`, true `(0,0)` -- no kill happened at all). Not a new
+  mechanism -- this pattern was flagged once, much earlier in the
+  project, and never confirmed or re-seen until now. Its confidence
+  (0.139) is the lowest in the batch, well under the previously-
+  rejected 20%-auto-reject threshold -- worth checking whether a
+  low-confidence filter catches phantom-class errors specifically,
+  even though earlier analysis showed it doesn't help the dominant
+  fabricated-bullet-count class.
+
+**Start here next session:** four candidate leads now, still no clear
+winner -- pick between:
+1. Frame-trace video4 `id=2`'s undercount (t=490.7, video4) -- still
+   unconfirmed as a real pattern (zero repeats in video5).
+2. Frame-trace video4 `id=5`'s wrong-kind result (t=547.5, video4) --
+   also still a single instance, no repeat in video5.
+3. Frame-trace video5 `id=3`'s total phantom (t=341.8, video5) -- ties
+   back to an old, never-confirmed hypothesis about
+   `MAX_PLAUSIBLE_COMBO_VALUE` thinning sample density; its very low
+   confidence (0.139) might make it easier to trace than the others.
+4. Root-cause the dominant fabricated-bullet-count-on-bonus-kill bug
+   itself (7/8 wrong clips across the last two rounds) -- the single
+   biggest lever by volume, even though it's the least "new" of the
+   four and has resisted every fix so far this session.
+No strong opinion yet on which has the best return -- worth a short
+discussion before picking, same as every other fork in this project.
+
 ## Status as of 2026-09-18 (a fourth video, later) — video4's
 ## post-calibration-fix clips reviewed: 2/6 correct, with two failure
 ## modes never seen before (an undercount, and the first-ever true
-## n_bullet>0). **Start here next session: pick one of the two new
-## leads below and frame-trace it, or continue reviewing more
-## videos/clips to get a clearer read on whether these are common
-## patterns or one-offs -- no strong signal yet on which** (read this
-## first -- supersedes everything below, including the immediately
-## following calibration-fix section, kept for its own implementation
-## detail)
+## n_bullet>0) (superseded by the section above -- kept for its own
+## per-clip detail, which the section above didn't repeat)
 
 **User reviewed video4's fresh 6-clip set (post calibration fix): 2/6
 correct (33.3%).** Not a clean comparison to the pre-fix round's 4/8
@@ -1211,6 +1579,10 @@ uv run yt-dlp -f 298 -o /tmp/biomercs-footage3/source.mp4 \
 mkdir -p /tmp/biomercs-footage4
 uv run yt-dlp -f 298 -o /tmp/biomercs-footage4/source.mp4 \
   "https://www.youtube.com/watch?v=zIMN3UNyo2s"
+
+mkdir -p /tmp/biomercs-footage5
+uv run yt-dlp -f 298 -o /tmp/biomercs-footage5/source.mp4 \
+  "https://www.youtube.com/watch?v=HYXLHArtq1I"
 ```
 
 Then regenerate manifests (deterministic — same code + same video means
@@ -1222,7 +1594,7 @@ missing directories, so re-running into a stale dir silently mixes old
 and new clips (bit the previous session once already):
 
 ```bash
-rm -rf /tmp/biomercs-run /tmp/biomercs-run2 /tmp/biomercs-run3 /tmp/biomercs-run4
+rm -rf /tmp/biomercs-run /tmp/biomercs-run2 /tmp/biomercs-run3 /tmp/biomercs-run4 /tmp/biomercs-run5-new
 uv run python -c "
 from pathlib import Path
 from biomercs_ml import pipeline
@@ -1230,8 +1602,14 @@ pipeline.run('/tmp/biomercs-footage/source.mp4', Path('/tmp/biomercs-run'), Path
 pipeline.run('/tmp/biomercs-footage2/source.mp4', Path('/tmp/biomercs-run2'), Path('/tmp/biomercs-run2/manifest.sqlite'))
 pipeline.run('/tmp/biomercs-footage3/source.mp4', Path('/tmp/biomercs-run3'), Path('/tmp/biomercs-run3/manifest.sqlite'))
 pipeline.run('/tmp/biomercs-footage4/source.mp4', Path('/tmp/biomercs-run4'), Path('/tmp/biomercs-run4/manifest.sqlite'))
+pipeline.run('/tmp/biomercs-footage5/source.mp4', Path('/tmp/biomercs-run5-new'), Path('/tmp/biomercs-run5-new/manifest.sqlite'))
 "
 ```
+
+Note: `/tmp/biomercs-run5` (no suffix) was an old, unrelated stale
+run from a much earlier session -- the fifth cross-validation video
+added this session uses `/tmp/biomercs-run5-new` to avoid colliding
+with it. Don't reuse the plain `biomercs-run5` name for this video.
 
 Each `pipeline.run` now takes **~2 minutes** on a ~10min video (#6's
 CPU parallelization across `sample_video`, landed a few sessions ago --

@@ -25,6 +25,24 @@ the time spent setting it up.
   group (e.g. 3 simultaneous bonus kills → clock +15s, one popup shown).
   This is why HUD-popup text is not a reliable signal for counting bonus
   kills — the run timer's actual value is.
+- **A bullet kill *can* take out more than one enemy at once** — shotgun
+  spread, or a sniper/magnum round penetrating through a lined-up
+  enemy, can both kill multiple targets with a single shot. This is
+  rare in competitive "good" runs specifically because it hurts the
+  score (a multi-kill via bullets wastes what could've been separate
+  bonus kills) — players who get an accidental multi-bullet-kill will
+  often just restart the run rather than keep it. So `n_bullet > 1` in
+  one group is possible, just uncommon, and closer to a played-around
+  outcome than a repeatable technique.
+- **A real bonus+bullet mix within the same kill-group is rarer still,
+  and in the author's own experience always traces back to an external
+  cause** — e.g. the player weakens enemies and dashes in for a bonus
+  finish, but another NPC's molotov or thrown dynamite kills one or
+  more enemies (via explosion, not the player's shot) in the same
+  instant. It's essentially never the *player's own* single action
+  producing both kill types at once. Useful for telling a genuine mixed
+  group apart from a misread: a real one usually has some other
+  in-scene explanation, not just "the numbers say so."
 
 ## Character techniques
 
