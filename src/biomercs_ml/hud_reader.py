@@ -175,19 +175,39 @@ def find_best_offset(
     resized_template = cv2.resize(combo_label_template, (w, h))
     frame_h, frame_w = frame.shape[:2]
 
-    best_offset = (0, 0)
-    best_score = -1.0
-    for dy in range(-search_radius_px, search_radius_px + 1):
-        for dx in range(-search_radius_px, search_radius_px + 1):
-            x, y = base_x + dx, base_y + dy
-            if x < 0 or y < 0 or x + w > frame_w or y + h > frame_h:
-                continue
-            crop = frame[y : y + h, x : x + w]
-            result = cv2.matchTemplate(crop, resized_template, cv2.TM_CCOEFF_NORMED)
-            score = float(result[0, 0])
-            if score > best_score:
-                best_score = score
-                best_offset = (dx, dy)
+    def score_at(dx: int, dy: int) -> float | None:
+        x, y = base_x + dx, base_y + dy
+        if x < 0 or y < 0 or x + w > frame_w or y + h > frame_h:
+            return None
+        crop = frame[y : y + h, x : x + w]
+        result = cv2.matchTemplate(crop, resized_template, cv2.TM_CCOEFF_NORMED)
+        return float(result[0, 0])
+
+    def best_in(dx_range: range, dy_range: range, best_offset: tuple[int, int], best_score: float):
+        for dy in dy_range:
+            for dx in dx_range:
+                if abs(dx) > search_radius_px or abs(dy) > search_radius_px:
+                    continue
+                score = score_at(dx, dy)
+                if score is not None and score > best_score:
+                    best_score = score
+                    best_offset = (dx, dy)
+        return best_offset, best_score
+
+    stride = config.OFFSET_COARSE_SEARCH_STRIDE_PX
+    best_offset, best_score = best_in(
+        range(-search_radius_px, search_radius_px + 1, stride),
+        range(-search_radius_px, search_radius_px + 1, stride),
+        (0, 0),
+        -1.0,
+    )
+    coarse_dx, coarse_dy = best_offset
+    best_offset, best_score = best_in(
+        range(coarse_dx - stride, coarse_dx + stride + 1),
+        range(coarse_dy - stride, coarse_dy + stride + 1),
+        best_offset,
+        best_score,
+    )
     return best_offset, best_score
 
 

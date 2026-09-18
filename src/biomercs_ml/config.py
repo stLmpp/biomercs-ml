@@ -54,6 +54,16 @@ DIGIT_SEARCH_MARGIN_PX = 6
 # above, even at the same resolution. find_best_offset() searches this
 # radius once per video to compensate.
 OFFSET_SEARCH_RADIUS_PX = 20
+# A brute-force search over the full radius is (2*radius+1)^2 = 1681
+# cv2.matchTemplate calls per candidate frame -- measured (cProfile) as
+# the dominant cost of calibration, ~60s/video (~12% of a full
+# pipeline run). find_best_offset() instead does a coarse grid at this
+# stride first, then refines at 1px resolution in a window of this
+# same size around the coarse winner -- the correlation landscape for
+# a fixed HUD label search is smooth/unimodal at this scale, so this
+# reliably finds the same exact-pixel optimum as brute force (see
+# test_hud_reader_offset.py) for a fraction of the calls.
+OFFSET_COARSE_SEARCH_STRIDE_PX = 4
 # Calibration checks many more candidate positions per frame than a
 # normal validity check (a (2*radius+1)^2 grid vs. one fixed ROI), so a
 # frame with no real HUD at all (e.g. a pre-gameplay intro) has a much

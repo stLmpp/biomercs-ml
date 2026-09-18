@@ -1,3 +1,6 @@
+from unittest.mock import patch
+
+import cv2
 import numpy as np
 
 from biomercs_ml import config, hud_reader
@@ -28,6 +31,22 @@ def test_find_best_offset_recovers_known_shift():
 
     assert offset == (shift_x, shift_y)
     assert score > config.COMBO_LABEL_MIN_CONFIDENCE
+
+
+def test_find_best_offset_uses_far_fewer_matchtemplate_calls_than_brute_force():
+    # A full brute-force grid at radius=20 is (2*20+1)**2 = 1681 calls --
+    # measured as the dominant cost of calibration (~60s/video, ~12% of
+    # a full pipeline run) via cProfile. Coarse-to-fine search must call
+    # cv2.matchTemplate far fewer times while still finding the same
+    # optimum (see the other tests in this file, which assert exact
+    # offsets are still recovered).
+    frame = hud_reader.load_image(FRAME_PATH)
+    combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
+
+    with patch("biomercs_ml.hud_reader.cv2.matchTemplate", wraps=cv2.matchTemplate) as mock_match:
+        hud_reader.find_best_offset(frame, combo_label_template, search_radius_px=20)
+
+    assert mock_match.call_count < 400
 
 
 def test_find_best_offset_falls_back_when_nothing_matches():
