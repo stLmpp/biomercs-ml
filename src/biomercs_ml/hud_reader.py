@@ -249,6 +249,8 @@ def sample_video(
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS)
     frame_interval = max(1, round(fps * interval_s))
+    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    duration_s = total_frames / fps if fps and total_frames else 0.0
 
     offset = _calibrate_offset(cap, combo_label_template, frame_interval)
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -257,6 +259,7 @@ def sample_video(
     session_id = 0
     last_timer_value: float | None = None
     frame_idx = 0
+    last_logged_percent = -config.PROGRESS_LOG_INTERVAL_PERCENT
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -267,6 +270,11 @@ def sample_video(
             continue
 
         timestamp_s = (frame_idx - 1) / fps
+        if duration_s > 0:
+            percent = int(timestamp_s / duration_s * 100)
+            if percent >= last_logged_percent + config.PROGRESS_LOG_INTERVAL_PERCENT:
+                print(f"sample_video: {percent}% ({timestamp_s:.1f}s/{duration_s:.1f}s), {len(samples)} samples so far")
+                last_logged_percent = percent
         is_valid, hud_conf = is_valid_hud_frame(frame, combo_label_template, offset)
         if not is_valid:
             continue

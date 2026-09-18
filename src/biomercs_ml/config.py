@@ -113,6 +113,11 @@ GROUP_SIZE_CONFIDENCE_FACTOR: dict[int, float] = {
 # into the next tick's window.
 SAMPLE_VOTE_FRAMES = 11
 
+# sample_video has no other visibility into a multi-minute run --
+# print progress at most this often (in percent of total video
+# duration processed) instead of staying silent until it returns.
+PROGRESS_LOG_INTERVAL_PERCENT = 10
+
 SAMPLE_INTERVAL_S = 0.2
 SESSION_RESET_DROP_S = 1.0
 SESSION_RESET_JUMP_S = 25.0

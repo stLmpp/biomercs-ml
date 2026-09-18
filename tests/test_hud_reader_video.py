@@ -33,6 +33,30 @@ def test_sample_video_reads_consistent_samples_from_static_video():
         assert sample.pickup_popup is False
 
 
+def test_sample_video_logs_progress(capsys):
+    # Real runs take several minutes with no visibility at all
+    # otherwise (the user had to ask "is this still running?" -- see
+    # DECISIONS.md). Print periodic progress instead of staying silent
+    # until the very end.
+    timer_templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
+    combo_templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+    combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
+    popup_digit_templates = hud_reader.load_digit_templates(config.POPUP_DIGITS_DIR)
+    popup_label_template = hud_reader.load_image(config.POPUP_LABEL_TEMPLATE_PATH)
+
+    hud_reader.sample_video(
+        Path(VIDEO_PATH),
+        timer_templates,
+        combo_templates,
+        combo_label_template,
+        popup_digit_templates,
+        popup_label_template,
+    )
+
+    captured = capsys.readouterr()
+    assert "%" in captured.out
+
+
 def test_sample_video_applies_calibrated_offset_only_to_validity_check():
     # The label ROI used to find a per-video offset can find a better
     # score at a shifted position (e.g. font self-similarity in "COMBO")
