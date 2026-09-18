@@ -77,19 +77,33 @@ misclassified** as a result — treat them as provisional.
 also incidentally fixes the fifth root cause's previously
 "permanent, accepted" overexposed-frame case one layer earlier.
 
-**Start here next session — this is now the highest-leverage next
-step:** extend multi-sample template curation to digits `1, 2, 4, 6,
-8, 9`, the same way `0/3/5/7` were done. Both screenshot zips (with
-the original-texture atlases) are still on disk under `resources/`
-(gitignored) — **no new material needed from the user**, just re-run
-the already-documented extraction recipe (DECISIONS.md, "2026-09-17
-follow-up" / "further follow-up" entries) for the six under-curated
-digits. Do this *before* trusting or re-investigating any more of the
-Bug A/B/C/D clip classifications — many may turn out to be this same
-single-bad-sample problem in disguise. After curation lands, re-run
-the pipeline on both videos, re-review from scratch, and re-classify
-whatever's still wrong. Video 1 still hasn't been reviewed with the
-correction-capable script at all.
+**Template curation for `1, 2, 4, 6, 8, 9` is now done, but only
+partially effective — see DECISIONS.md for full detail.** Real-footage
+samples added for `1/2/4/6/9` (visually verified against the actual
+frame each time, since several plausible-looking `read_combo` outputs
+during the search turned out to themselves be misreads). No real "8"
+occurrence was found in either full video even at a very low
+confidence threshold — `8` got one atlas-sourced supplementary sample
+instead. **Verified real but incomplete improvement:** an independent
+frame (video 2, t=409.2s) now reads correctly; another (video 1,
+t=252.4s) still misreads its tens digit "6" (only 2 samples for that
+digit, thinner coverage than `0/3/5/7`'s 4-5). The original
+adversarial t=124.0 frame that surfaced this whole finding still
+misreads even with new samples — may be its own "accepted pixel-level
+limit" like the fifth root cause's t=408.8s frame, not conclusively
+determined. Stopped curating further (diminishing returns without new
+screenshot material; both zips are now fully mined for this video
+pair's low-combo stretches) — the `MAX_PLAUSIBLE_COMBO_VALUE` cap and
+`event_detector`'s existing safeguards catch what curation alone
+couldn't.
+
+**Start here next session:** re-run the pipeline on both videos and
+re-review from scratch. This is the real test of how much this whole
+session's work (Bug C, Bug D, the combo cap, and the partial digit
+curation) moved the needle together — stop chasing individual frames
+in isolation and look at the aggregate agreement rate instead. Video 1
+still hasn't been reviewed with the correction-capable script at all.
+Remember to use a fresh output directory (see the gotcha below).
 
 **Gotcha to remember:** `/tmp` output directories are *not* reliably
 cleared within a single ongoing session (only between sessions) —
