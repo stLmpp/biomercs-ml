@@ -2,9 +2,160 @@
 
 Paste this whole file as your first message in a new session to continue.
 
-## Status as of 2026-09-18 (later) (read this first -- supersedes
-## everything below, including the earlier 2026-09-18 and 2026-09-17
-## sections; they're historical context now, not the current next step)
+## Status as of 2026-09-18 (even later) — mid-implementation of a
+## performance track (#6, parallelizing `sample_video`); accuracy work
+## is paused, not abandoned (read this first -- supersedes everything
+## below, including all earlier 2026-09-18 and 2026-09-17 sections;
+## they're historical context now, not the current next step)
+
+**What happened, in order:** re-ran the full pipeline on video 2 with
+Bug C + Bug D + the combo cap + partial digit curation all in place
+(see the section below for what those are), full-reviewed it, then
+downloaded and ran a **third video**
+(`https://www.youtube.com/watch?v=8ilpJYjIRtQ`, format 298, same
+1280x720@60fps) for cross-validation, full-reviewed that too. **All
+three videos now reviewed. Combined result: 6/17 (video 1+2) + 1/3
+(video 3) correct — roughly 30-35% agreement, not meaningfully better
+than session start**, and the fixes so far haven't closed the gap:
+
+- `bonus_kill` stays solid (6/7 correct across the reviewed sample).
+- **Every single `bullet_kill`/`mixed` clip is wrong** across all three
+  videos. The dominant pattern (`review_true_n_bullet=0` in nearly
+  every wrong clip) is Bug A's signature: a real `bonus_kill` getting a
+  fabricated bullet count. **Bug A is still not fixed** — it needs the
+  architectural change flagged when it was found (search a window for
+  the timer delta instead of trusting one adjacent-sample pair), which
+  was deliberately not attempted yet.
+- One new wrinkle: a couple of wrong clips this round were **total
+  phantom events** (`review_true=(0,0)`, no kill happened at all) —
+  a pattern not seen in earlier rounds. Working theory, not yet
+  confirmed: `MAX_PLAUSIBLE_COMBO_VALUE` rejecting more readings
+  thinned sample density enough that the dip/reversion guards (which
+  need nearby samples to catch a correction) now have gaps. **Not
+  investigated further this session** — got sidetracked into
+  performance work instead (see below). Worth frame-tracing one of
+  these (e.g. video 1 id=1, t=62.2) before resuming Bug A.
+
+**Accuracy work was paused here, mid-investigation, in favor of a
+performance track** — not because it's done, but because the user
+asked "why is this taking so long" after the third video's pipeline
+run and the conversation went there instead. **Do not lose the thread
+above** — Bug A is still the single biggest lever on accuracy, and the
+new phantom-event pattern needs its own root-cause trace.
+
+### Performance track (started this session, mid-implementation)
+
+Profiled `sample_video` with `cProfile` (real evidence, not
+assumption): of a ~500s pipeline run on a ~615s video, **~84% is the
+per-tick digit-matching loop, ~12% is HUD-offset calibration, ~4% is
+raw frame decode**. 97.9% of all time is inside `cv2.matchTemplate`
+itself (native OpenCV C++), not Python overhead — the problem is *call
+count*, not language speed. Full numbers and reasoning: DECISIONS.md,
+whichever entry covers the performance investigation (search for
+"matchTemplate" or "calibration").
+
+The user asked for a ranked list of candidate optimizations (with
+expected gain / confidence-it's-the-problem / confidence-the-fix-works
+for each) before committing to any of them. Decisions made, in the
+user's own words:
+
+1. **Coarse-to-fine search for HUD offset calibration — DONE.**
+   `find_best_offset` did a brute-force 1681-position grid search per
+   candidate frame; replaced with a coarse pass at
+   `config.OFFSET_COARSE_SEARCH_STRIDE_PX` then a 1px refinement
+   around the winner. TDD'd (a new test asserts far fewer
+   `matchTemplate` calls; existing exact-offset-recovery tests prove
+   no accuracy regression). **Measured real result: calibration
+   59.5s -> 6.9s (8.6x), same exact offset found.** Side effect: the
+   whole test suite also dropped from ~22s to ~6s wall time.
+2. **Lower `SAMPLE_VOTE_FRAMES` back down from 11 — REJECTED, do not
+   re-suggest.** User's own words: "SAMPLE_VOTE_FRAMES must be 11."
+   11 is the proven minimum for the real Bug D case (t=522.0); this is
+   settled, not open for re-litigation.
+3. **Early-exit in `match_digit`** (stop scanning once a sample clears
+   a confidence threshold) — **investigated, then explicitly
+   rejected by the user ("skip 3"), do not re-suggest without new
+   information.** Real-footage score-distribution check found the
+   median winning score is only 0.889 (p75=0.926) — any threshold low
+   enough to matter would risk letting an over-matching digit (like
+   "8", per the earlier finding) win *before* the true digit's own
+   sample is even checked, since dict iteration order is `0..9` and
+   `match_digit` currently finds the true global max across all
+   digits/samples, not a first-match. A safe near-1.0 threshold would
+   almost never fire (p95=0.984), so the risk/reward doesn't work.
+4. **Batched/vectorized correlation** (replace many small
+   `cv2.matchTemplate` calls with one large batched op, e.g. via
+   PyTorch) — **on hold, user's own words: "hold."** Not started.
+5. **Downscale crops/templates further** — **rejected as not worth
+   it**, crops are already tiny (34x46px), per-call overhead already
+   dominates over pixel count.
+6. **Parallelize `sample_video`'s per-tick loop across CPU cores —
+   the user's stated top pick ("this is the best one I think"),
+   design agreed in chat, implementation not yet started.** This is
+   where to resume:
+
+**Agreed design for #6 (from in-chat discussion, do not re-derive):**
+- Split into two phases. Phase 1 (parallel): a new worker function,
+  something like `_sample_range(video_path, start_tick, end_tick,
+  frame_interval, templates..., offset)`, where each worker opens its
+  *own* `cv2.VideoCapture`, seeks to its assigned start tick, and does
+  today's per-tick logic (validity check, burst read, majority-voted
+  timer/combo/popup) for its range -- but does **not** touch
+  `session_id`/`last_timer_value` at all. Returns a plain list of raw
+  per-tick results (timestamp, timer_value, combo_value, confidence,
+  pickup_popup).
+- Phase 2 (sequential, cheap, no `matchTemplate` calls): `sample_video`
+  concatenates all workers' results *in chunk order* (chunks are
+  naturally time-ordered, so this is just concatenation, not a merge
+  sort), then runs the existing `is_new_session`/`last_timer_value`
+  assignment pass over the merged, ordered list -- this is the *only*
+  part that's inherently sequential, and it's fast bookkeeping, not
+  the expensive part.
+- Chunk boundaries must align to tick multiples (not arbitrary frame
+  counts) so no worker ever needs a frame from a neighboring chunk's
+  range for its own burst reads.
+- Use `ProcessPoolExecutor` (CPU-bound work; threads don't help, GIL).
+- **New `max_workers` parameter on `sample_video`, defaulting to
+  `os.cpu_count()`.** Critically: **tests must pass `max_workers=1`**,
+  which should skip subprocess spawning entirely and just call the
+  chunk function in-process -- this is *why* `max_workers=1` matters,
+  not just a default choice: a lot of existing tests
+  (`test_sample_video_majority_votes_combo_within_each_tick` and
+  others) work by `unittest.mock.patch`-ing `hud_reader.read_timer`/
+  `read_combo`/etc. in the test process. Those patches do **not**
+  apply inside a real subprocess -- moving the digit-matching work
+  into subprocesses would silently break that whole mocking-based test
+  suite unless `max_workers=1` keeps everything in-process for tests.
+- TDD as always: write the failing tests first (existing mocking-based
+  tests should keep passing unmodified once they pass `max_workers=1`;
+  new tests should cover chunk-boundary correctness and that
+  parallel vs. sequential produce identical `HudSample` lists on a
+  real small fixture).
+
+**GPU acceleration was investigated and explicitly deferred, not
+rejected** -- documented in
+`docs/knowledge_base/project-ideas.md` ("GPU acceleration for
+digit-template matching"). Benchmarked directly on this Mac (M2 Pro,
+OpenCL available): `cv2.UMat` GPU dispatch measured **~30x slower**
+than CPU for this workload (3.2ms/call vs 0.11ms/call) -- tiny 34x46px
+crops mean per-call GPU dispatch overhead dominates completely. The
+user also has a second PC (AMD 9700X + Radeon 9070 XT) -- its CPU
+would help #6 proportionally to core count, but the GPU would very
+likely hit the same overhead problem (possibly worse, discrete PCIe
+transfer latency vs. Apple Silicon's unified memory) unless paired
+with the same big batching rewrite as item 4 above. **Don't re-raise
+GPU acceleration without a batching rewrite already in progress.**
+
+**Start here next session:** implement #6 per the agreed design above,
+TDD first. After that lands and is verified (re-time a real pipeline
+run, confirm identical output to the sequential path on at least one
+real video), circle back to the paused accuracy thread: root-cause the
+new phantom-event pattern, then tackle Bug A's architectural fix
+(still the single biggest remaining lever on the actual dataset
+quality, independent of how fast the pipeline runs).
+
+## Status as of 2026-09-18 (later) (superseded by the above --
+## kept for history)
 
 Picked up exactly where the previous status left off ("Start here next
 session: pick... id=8"). Frame-by-frame traced id=8 plus two more of
@@ -611,24 +762,39 @@ uv run yt-dlp -f 298 -o /tmp/biomercs-footage/source.mp4 \
 mkdir -p /tmp/biomercs-footage2
 uv run yt-dlp -f 298 -o /tmp/biomercs-footage2/source.mp4 \
   "https://www.youtube.com/watch?v=u9DA7ueGiH0"
+
+mkdir -p /tmp/biomercs-footage3
+uv run yt-dlp -f 298 -o /tmp/biomercs-footage3/source.mp4 \
+  "https://www.youtube.com/watch?v=8ilpJYjIRtQ"
 ```
 
 Then regenerate manifests (deterministic — same code + same video means
 identical `session_id`/`event_timestamp_s` pairs reappear, so the ids
-referenced above will line up again):
+referenced above will line up again). **Always `rm -rf` the output dir
+first** if it might already exist from an earlier run this session —
+`dataset_manifest.create_db` doesn't clear existing rows, only creates
+missing directories, so re-running into a stale dir silently mixes old
+and new clips (bit the previous session once already):
 
 ```bash
+rm -rf /tmp/biomercs-run /tmp/biomercs-run2 /tmp/biomercs-run3
 uv run python -c "
 from pathlib import Path
 from biomercs_ml import pipeline
 pipeline.run('/tmp/biomercs-footage/source.mp4', Path('/tmp/biomercs-run'), Path('/tmp/biomercs-run/manifest.sqlite'))
 pipeline.run('/tmp/biomercs-footage2/source.mp4', Path('/tmp/biomercs-run2'), Path('/tmp/biomercs-run2/manifest.sqlite'))
+pipeline.run('/tmp/biomercs-footage3/source.mp4', Path('/tmp/biomercs-run3'), Path('/tmp/biomercs-run3/manifest.sqlite'))
 "
 ```
 
-Each `pipeline.run` takes ~2.5-3 minutes (majority-voting reads 3
-frames per tick now, up from 1, so this is slower than early-session
-runs — expected, not a regression).
+Each `pipeline.run` currently takes **~8-9 minutes** on a ~10min video
+(`SAMPLE_VOTE_FRAMES` went 3->11 for Bug D, ~3.6x more per-tick work;
+partially offset by calibration's coarse-to-fine speedup). Progress
+prints every ~10% of video duration processed (`hud_reader.
+sample_video`'s own logging, added this session so a run is never
+silent) — if implementing #6 (parallelization) this session, this
+runtime should drop substantially; re-measure and update this note
+once it does.
 
 ## Decisions already made — do not re-ask
 
