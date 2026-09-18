@@ -2,12 +2,75 @@
 
 Paste this whole file as your first message in a new session to continue.
 
+## Status as of 2026-09-18 (accuracy, resumed once more) — the
+## group_size fix reviewed: id=3 (its primary target) is now correct;
+## id=4 improved but still short (true 2, detected 1); video3's
+## newly-recovered clip is real but overshoots by one. Also found and
+## fixed a real bug in the review tooling itself (a matching correction
+## wasn't normalized to "y"). **Start here next session: root-cause
+## id=4's undercount or video3's overcount (see below), OR move on to a
+## different bug class (video2's Bug A/B-class wrong clips, or the
+## t=62.2 phantom) -- your call, no single obvious next lever this
+## time** (read this first -- supersedes everything below)
+
+**User manually reviewed all 11 fresh clips** across all three videos
+(`scripts/review_sample.py` against the `after` A/B manifests from the
+group_size fix) -- **3/11 correct (27.3%)**, roughly flat vs. the prior
+3/10 baseline, which is expected: the group_size fix only targeted one
+specific bug class, not every wrong clip in the dataset. Full per-clip
+breakdown and reasoning: `docs/superpowers/DECISIONS.md`, entry
+"Manual review of the fix's clips". Key results:
+
+- **`id=3` (t=196.2, the fix's primary target): now correct.** Confirms
+  the fix works exactly as designed.
+- **`id=4` (t=526.2): still wrong but meaningfully closer** -- true
+  `(2,0)`, detected now `(1,0)` (was `(1,4)` before the fix). This is
+  the known limitation flagged in the fix's own test/DECISIONS.md
+  entry: the reconstructed value from the available samples is 1, not
+  the true 2 -- would need the actual clip video (not just per-tick
+  HUD samples) to fully recover the second kill.
+- **video3's newly-recovered clip (t=536.5): wrong, true `(1,0)` vs.
+  detected `mixed(1,1)`** -- the fix correctly recovered a previously
+  *entirely-dropped* group (the old code silently lost it to the
+  implausible-jump cap), but overshoots by one spurious bullet kill.
+  Net improvement over losing the event outright, but not a full fix.
+- **video1 `id=1`/`id=2`, all of video2: unchanged, as the A/B diff
+  predicted** -- different, already-catalogued bug classes (the t=62.2
+  phantom/Bug-B residual, and the t=124.0 frame-math-vs-watching-the-
+  clip discrepancy from a prior session), untouched by this fix.
+
+**Also found and fixed, mid-review:** the review tooling itself had a
+real bug -- typing a `<bonus>/<bullet>` correction that happens to
+match what was already detected (an easy mistake when meaning to type
+`y`) used to always record the clip as incorrect. Fixed via
+`review.normalize_review_answer` (see DECISIONS.md, same entry). Not
+relevant to the pipeline's actual detection accuracy, just a data-entry
+integrity fix for the review process itself.
+
+**Start here next session:** no single obvious next lever this
+time -- pick between:
+1. Root-cause `id=4`'s remaining undercount or video3's overcount with
+   the usual frame-by-frame methodology (both are now much smaller,
+   more tractable gaps than before this session's fix -- 1-off, not
+   4-7 off).
+2. Move to a different bug class entirely: video2's wrong clips are
+   confirmed Bug A/B-class (digit-pair misreads under chaotic footage),
+   not group_size fabrication -- template curation or a fresh
+   frame-trace investigation, not more event_detector work.
+3. The t=62.2 phantom/Bug-B residual (already flagged as low-priority,
+   diminishing returns from template curation) -- probably still not
+   worth chasing without new material.
+No strong signal yet on which of these has the best return -- worth a
+short discussion before picking, same as every other fork in this
+project.
+
 ## Status as of 2026-09-18 (accuracy, resumed yet further) —
 ## `group_size` overestimation root-caused and fixed (prev/curr combo
 ## anchors now clamped against their nearest trusted neighbor); verified
-## on real footage via a full A/B diff across all three videos. **Start
-## here next session: a full manual review pass of the fresh clips on
-## all three videos** (read this first -- supersedes everything below)
+## on real footage via a full A/B diff across all three videos.
+## (superseded by the section above -- kept for the fix's own
+## implementation/verification detail, which the section above didn't
+## repeat)
 
 **Root cause and fix:** see `docs/superpowers/DECISIONS.md`, entry
 "`group_size` overestimation root-caused and fixed" for full detail.
