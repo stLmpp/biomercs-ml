@@ -2,11 +2,71 @@
 
 Paste this whole file as your first message in a new session to continue.
 
+## Status as of 2026-09-18 (newest) — #6 (parallelize `sample_video`)
+## is DONE and verified; performance track is complete for now, pick
+## the paused accuracy thread back up next (read this first --
+## supersedes everything below, including the "even later" section
+## right under this one; they're historical context now, not the
+## current next step)
+
+**#6 is implemented, TDD'd, and verified against real footage --
+see `docs/superpowers/DECISIONS.md`, entry "Parallelized `sample_video`
+across CPU cores" for full detail. Short version:**
+
+- `sample_video` now takes a `max_workers` parameter (default
+  `os.cpu_count()`); a new `_sample_range` worker function does the
+  per-tick digit-matching work for a `[start_frame_idx, end_frame_idx)`
+  range in its own `cv2.VideoCapture` / subprocess, `sample_video`
+  dispatches chunks via `ProcessPoolExecutor`, concatenates in chunk
+  order, then runs the `session_id`/`last_timer_value` bookkeeping pass
+  once, sequentially, over the merged list. `max_workers=1` skips
+  `ProcessPoolExecutor` entirely (calls `_sample_range` in-process) so
+  the existing `unittest.mock.patch`-based test suite keeps working
+  unmodified -- all 7 pre-existing `sample_video(...)` test call sites
+  now explicitly pass `max_workers=1`.
+- Two new tests added, both real (not mocked): chunk-boundary
+  correctness (`_sample_range` split into two adjacent sub-ranges ==
+  one full range, concatenated) and parallel-vs-sequential equivalence
+  (`max_workers=1` vs `max_workers=2` on the real fixture, exact
+  `HudSample` list match). **91 tests pass** (`uv run pytest -v`).
+- **Real-footage verification, not just unit tests:** a real 30s clip
+  ffmpeg-trimmed from video 1 gave byte-identical output between
+  `max_workers=1` and `max_workers=8` (25.88s -> 7.65s, 3.4x). A full
+  `pipeline.run` on the entire ~10min video 1 (10 cores on this
+  machine) went from the ~500s baseline that started this performance
+  track to **115.2s -- ~4.3x real end-to-end speedup**. Did not re-run
+  the full sequential path a second time on the whole video (would cost
+  another ~8-9 minutes for marginal confidence beyond the exact-match
+  30s real-clip result) -- see DECISIONS.md for the full reasoning on
+  why that verification bar was judged sufficient.
+- The lower clip count seen in this run (10, vs. earlier sessions'
+  "17") is **expected and unrelated to parallelization** -- this
+  session started from wherever Bug C/D + the combo cap + partial
+  digit curation had already left things, and only touched performance,
+  not accuracy. Don't read anything into that number changing.
+
+**GPU acceleration remains deferred, not reconsidered** -- nothing in
+this session's real numbers (4.3x from CPU parallelism alone) changes
+the earlier verdict in `docs/knowledge_base/project-ideas.md`. Still
+don't re-raise it without a batching rewrite already in progress.
+
+**Start here next session: go back to the paused accuracy thread.**
+Performance is no longer the excuse -- a full pipeline run now takes
+~2 minutes instead of ~8-9, so iterating on accuracy fixes is cheap
+again. Pick up exactly where the accuracy work was paused (see the
+"even later" section right below, which is otherwise fully superseded
+by this one): **Bug A is still not fixed** (the architectural change --
+search a window for the timer delta instead of trusting one
+adjacent-sample pair -- was deliberately not attempted yet, see below
+for why it's the single biggest lever), and there's an unconfirmed
+phantom-event pattern worth frame-tracing (e.g. video 1 id=1, t=62.2)
+before resuming Bug A itself.
+
 ## Status as of 2026-09-18 (even later) — mid-implementation of a
 ## performance track (#6, parallelizing `sample_video`); accuracy work
-## is paused, not abandoned (read this first -- supersedes everything
-## below, including all earlier 2026-09-18 and 2026-09-17 sections;
-## they're historical context now, not the current next step)
+## is paused, not abandoned (superseded by the section above -- kept
+## for the accuracy-thread detail it still has, which the section
+## above intentionally didn't repeat)
 
 **What happened, in order:** re-ran the full pipeline on video 2 with
 Bug C + Bug D + the combo cap + partial digit curation all in place

@@ -1,11 +1,14 @@
+import math
+import os
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from biomercs_ml import config
-from biomercs_ml.models import HudSample
+from biomercs_ml.models import HudSample, RawHudSample
 
 
 def load_image(path: str) -> np.ndarray:
@@ -257,43 +260,41 @@ def _majority_value(
     return winning_value, max(winning_confidences)
 
 
-def sample_video(
+def _sample_range(
     video_path: Path,
     timer_templates: dict[str, np.ndarray],
     combo_templates: dict[str, np.ndarray],
     combo_label_template: np.ndarray,
     popup_digit_templates: dict[str, np.ndarray],
     popup_label_template: np.ndarray,
-    interval_s: float = config.SAMPLE_INTERVAL_S,
-) -> list[HudSample]:
+    offset: tuple[int, int],
+    fps: float,
+    frame_interval: int,
+    duration_s: float,
+    start_frame_idx: int,
+    end_frame_idx: float,
+) -> list[RawHudSample]:
     cap = cv2.VideoCapture(str(video_path))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_interval = max(1, round(fps * interval_s))
-    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    duration_s = total_frames / fps if fps and total_frames else 0.0
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame_idx)
 
-    offset = _calibrate_offset(cap, combo_label_template, frame_interval)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-
-    samples = []
-    session_id = 0
-    last_timer_value: float | None = None
-    frame_idx = 0
+    results = []
+    frame_idx = start_frame_idx
     last_logged_percent = -config.PROGRESS_LOG_INTERVAL_PERCENT
-    while True:
+    while frame_idx < end_frame_idx:
         ret, frame = cap.read()
         if not ret:
             break
+        current_idx = frame_idx
         frame_idx += 1
 
-        if (frame_idx - 1) % frame_interval != 0:
+        if current_idx % frame_interval != 0:
             continue
 
-        timestamp_s = (frame_idx - 1) / fps
+        timestamp_s = current_idx / fps
         if duration_s > 0:
             percent = int(timestamp_s / duration_s * 100)
             if percent >= last_logged_percent + config.PROGRESS_LOG_INTERVAL_PERCENT:
-                print(f"sample_video: {percent}% ({timestamp_s:.1f}s/{duration_s:.1f}s), {len(samples)} samples so far")
+                print(f"sample_video: {percent}% ({timestamp_s:.1f}s/{duration_s:.1f}s), {len(results)} samples so far")
                 last_logged_percent = percent
         is_valid, hud_conf = is_valid_hud_frame(frame, combo_label_template, offset)
         if not is_valid:
@@ -319,11 +320,6 @@ def sample_video(
         )
         confidence = min(hud_conf, timer_conf, combo_conf)
 
-        if timer_value is not None:
-            if last_timer_value is not None and is_new_session(last_timer_value, timer_value):
-                session_id += 1
-            last_timer_value = timer_value
-
         # Popup presence uses the calibrated offset like the combo-label
         # validity check above; the ones digit, like the timer/combo
         # digit slots, does not (see the comment above).
@@ -337,9 +333,80 @@ def sample_video(
             )
             pickup_popup = ones_digit == 0
 
-        samples.append(
-            HudSample(timestamp_s, session_id, timer_value, combo_value, confidence, pickup_popup)
-        )
+        results.append(RawHudSample(timestamp_s, timer_value, combo_value, confidence, pickup_popup))
     cap.release()
+
+    return results
+
+
+def sample_video(
+    video_path: Path,
+    timer_templates: dict[str, np.ndarray],
+    combo_templates: dict[str, np.ndarray],
+    combo_label_template: np.ndarray,
+    popup_digit_templates: dict[str, np.ndarray],
+    popup_label_template: np.ndarray,
+    interval_s: float = config.SAMPLE_INTERVAL_S,
+    max_workers: int | None = None,
+) -> list[HudSample]:
+    workers = max(1, max_workers if max_workers is not None else (os.cpu_count() or 1))
+
+    cap = cv2.VideoCapture(str(video_path))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_interval = max(1, round(fps * interval_s))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration_s = total_frames / fps if fps and total_frames else 0.0
+
+    offset = _calibrate_offset(cap, combo_label_template, frame_interval)
+    cap.release()
+
+    total_ticks = (total_frames + frame_interval - 1) // frame_interval if total_frames > 0 else 0
+
+    if workers == 1 or total_ticks <= 1:
+        end_frame_idx = total_ticks * frame_interval if total_ticks > 0 else math.inf
+        raw_samples = _sample_range(
+            video_path, timer_templates, combo_templates, combo_label_template,
+            popup_digit_templates, popup_label_template, offset, fps, frame_interval,
+            duration_s, 0, end_frame_idx,
+        )
+    else:
+        chunk_ticks = math.ceil(total_ticks / workers)
+        tick_ranges = [
+            (i * chunk_ticks, min(total_ticks, (i + 1) * chunk_ticks)) for i in range(workers)
+        ]
+        tick_ranges = [(start, end) for start, end in tick_ranges if start < end]
+
+        raw_samples = []
+        with ProcessPoolExecutor(max_workers=len(tick_ranges)) as executor:
+            futures = [
+                executor.submit(
+                    _sample_range, video_path, timer_templates, combo_templates,
+                    combo_label_template, popup_digit_templates, popup_label_template,
+                    offset, fps, frame_interval, duration_s,
+                    start_tick * frame_interval, end_tick * frame_interval,
+                )
+                for start_tick, end_tick in tick_ranges
+            ]
+            # Concatenated in submission order, not completion order --
+            # chunks are naturally time-ordered, so this is exactly the
+            # merged, ordered list session_id assignment below expects.
+            for future in futures:
+                raw_samples.extend(future.result())
+
+    samples = []
+    session_id = 0
+    last_timer_value: float | None = None
+    for raw in raw_samples:
+        if raw.timer_value_s is not None:
+            if last_timer_value is not None and is_new_session(last_timer_value, raw.timer_value_s):
+                session_id += 1
+            last_timer_value = raw.timer_value_s
+
+        samples.append(
+            HudSample(
+                raw.timestamp_s, session_id, raw.timer_value_s, raw.combo_value,
+                raw.confidence, raw.pickup_popup,
+            )
+        )
 
     return [s for s in samples if s.timer_value_s is not None and s.combo_value is not None]

@@ -938,3 +938,76 @@ re-review from scratch** -- that's the real test of how much all of
 this session's fixes (Bug C, Bug D, the combo cap, and this partial
 curation) moved the needle together, rather than continuing to
 chase individual frames in isolation.
+
+## 2026-09-18 (performance track, #6) — Parallelized `sample_video`
+## across CPU cores; ~4.3x real speedup, output verified identical to
+## the sequential path
+
+Implemented the design agreed in-chat (see HANDOFF.md for the full
+agreed design, kept there rather than duplicated here): split
+`sample_video` into a worker function, `_sample_range(video_path,
+templates..., offset, fps, frame_interval, duration_s, start_frame_idx,
+end_frame_idx)`, and an orchestrator. Each worker opens its own
+`cv2.VideoCapture`, seeks to its own start frame, and does the
+existing per-tick logic (validity check, burst read, majority vote)
+for its range, returning a new `RawHudSample` (timestamp, timer,
+combo, confidence, popup -- no `session_id`). `sample_video` runs
+calibration once, dispatches chunks via `ProcessPoolExecutor` (or
+calls `_sample_range` directly in-process when `max_workers=1`, no
+subprocess spawn at all), concatenates results in chunk-submission
+order (not completion order), then runs the `is_new_session`/
+`last_timer_value` bookkeeping pass once, sequentially, over the
+merged list -- exactly like the original single-pass loop did.
+
+**Why `max_workers=1` skips `ProcessPoolExecutor` entirely, not just
+defaults to one worker:** most of the existing test suite mocks
+`hud_reader.read_timer`/`read_combo`/etc. via `unittest.mock.patch` in
+the test process. Those patches don't apply inside a real subprocess,
+so a literal "always go through the executor, just with 1 worker"
+implementation would've silently broken every mocking-based test. All
+7 existing `sample_video(...)` call sites in
+`test_hud_reader_video.py` now explicitly pass `max_workers=1` for
+this reason.
+
+**New tests, not mocked, run against the real digit-matching code
+path:**
+- `test_sample_range_chunking_produces_same_raw_samples_as_one_full_range`
+  calls `_sample_range` directly with one full range vs. two adjacent
+  sub-ranges on the real `synthetic_static.mp4` fixture and asserts the
+  concatenated result is identical -- proves chunk boundaries (aligned
+  to tick multiples, i.e. frame-index multiples of `frame_interval`)
+  never need a neighboring chunk's frames for a burst read.
+- `test_sample_video_parallel_matches_sequential_output` runs
+  `sample_video` end-to-end with `max_workers=1` vs `max_workers=2` on
+  the same fixture (5 ticks total, so `max_workers=2` genuinely
+  exercises 2 non-empty chunks through a real `ProcessPoolExecutor`,
+  not a no-op) and asserts the full `HudSample` lists match exactly.
+
+**Verified against real downloaded footage this session** (video 1,
+`/tmp/biomercs-footage/source.mp4`, still on disk from a prior
+session -- not re-downloaded):
+- A real 30s clip (`ffmpeg`-trimmed from video 1 at t=60s, not
+  synthetic) sampled with `max_workers=1` vs `max_workers=8`:
+  **identical output** (`seq == par`), 25.88s -> 7.65s (3.4x).
+- A full `pipeline.run` on the entire video (10 cores available on
+  this machine, default `max_workers=os.cpu_count()`): **115.2s**,
+  down from the ~500s baseline this profiling track started from
+  (`hud_reader.sample_video`'s own docstring/handoff note) --
+  **~4.3x real end-to-end speedup**. Didn't re-run the full sequential
+  path a second time for a byte-for-byte full-video diff (would cost
+  another ~8-9 minutes for marginal additional confidence beyond the
+  real-footage 30s clip's exact-match result); the 30s real-clip test
+  above plus this run completing cleanly with a plausible clip count
+  is the verification bar this session judged sufficient.
+- Clip count on this run was lower than earlier sessions' historical
+  "17" figures for video 1 -- expected and unrelated to
+  parallelization: those older counts predate this session's starting
+  point (Bug C, Bug D, the combo cap, and partial digit curation were
+  already landed before this session began). Not a regression signal;
+  the paused accuracy thread (Bug A, the phantom-event pattern) is
+  still the open item, untouched by this change.
+
+**Not done, deliberately out of scope for #6:** re-timed and
+re-verified only; did not touch the paused accuracy investigation
+(Bug A, the new phantom-event pattern) -- see HANDOFF.md for why and
+what's next there.

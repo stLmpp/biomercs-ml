@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import cv2
+
 from biomercs_ml import config, hud_reader
 
 VIDEO_PATH = "tests/fixtures/synthetic_static.mp4"
@@ -20,6 +22,7 @@ def test_sample_video_reads_consistent_samples_from_static_video():
         combo_label_template,
         popup_digit_templates,
         popup_label_template,
+        max_workers=1,
     )
 
     # 1s video sampled every 0.2s -> ~5 samples; the frame never changes,
@@ -51,6 +54,7 @@ def test_sample_video_logs_progress(capsys):
         combo_label_template,
         popup_digit_templates,
         popup_label_template,
+        max_workers=1,
     )
 
     captured = capsys.readouterr()
@@ -84,6 +88,7 @@ def test_sample_video_applies_calibrated_offset_only_to_validity_check():
             combo_label_template,
             popup_digit_templates,
             popup_label_template,
+            max_workers=1,
         )
 
     def _received_fake_offset(call) -> bool:
@@ -133,6 +138,7 @@ def test_sample_video_majority_votes_combo_within_each_tick():
             combo_label_template,
             popup_digit_templates,
             popup_label_template,
+            max_workers=1,
         )
 
     assert samples
@@ -184,6 +190,7 @@ def test_sample_video_widens_the_vote_when_a_short_burst_picks_the_wrong_majorit
             combo_label_template,
             popup_digit_templates,
             popup_label_template,
+            max_workers=1,
         )
 
     assert samples
@@ -212,6 +219,7 @@ def test_sample_video_flags_pickup_popup_when_ones_digit_is_zero():
             combo_label_template,
             popup_digit_templates,
             popup_label_template,
+            max_workers=1,
         )
 
     assert samples
@@ -240,8 +248,90 @@ def test_sample_video_does_not_flag_the_fixed_kill_bonus_popup():
             combo_label_template,
             popup_digit_templates,
             popup_label_template,
+            max_workers=1,
         )
 
     assert samples
     for sample in samples:
         assert sample.pickup_popup is False
+
+
+def test_sample_range_chunking_produces_same_raw_samples_as_one_full_range():
+    # #6 (parallelization) splits sample_video's work into chunks aligned
+    # to tick multiples so no chunk ever needs a frame from a neighboring
+    # chunk's range for its own burst reads. Prove that directly: reading
+    # the same video as one chunk vs. as two adjacent chunks must produce
+    # identical concatenated raw samples.
+    timer_templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
+    combo_templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+    combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
+    popup_digit_templates = hud_reader.load_digit_templates(config.POPUP_DIGITS_DIR)
+    popup_label_template = hud_reader.load_image(config.POPUP_LABEL_TEMPLATE_PATH)
+
+    cap = cv2.VideoCapture(VIDEO_PATH)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    frame_interval = max(1, round(fps * config.SAMPLE_INTERVAL_S))
+    duration_s = total_frames / fps
+    total_ticks = (total_frames + frame_interval - 1) // frame_interval
+
+    def sample_range(start_tick: int, end_tick: int):
+        return hud_reader._sample_range(
+            Path(VIDEO_PATH),
+            timer_templates,
+            combo_templates,
+            combo_label_template,
+            popup_digit_templates,
+            popup_label_template,
+            (0, 0),
+            fps,
+            frame_interval,
+            duration_s,
+            start_tick * frame_interval,
+            end_tick * frame_interval,
+        )
+
+    full = sample_range(0, total_ticks)
+
+    mid = total_ticks // 2
+    assert 0 < mid < total_ticks
+    part1 = sample_range(0, mid)
+    part2 = sample_range(mid, total_ticks)
+
+    assert part1 + part2 == full
+
+
+def test_sample_video_parallel_matches_sequential_output():
+    # The real point of #6: running with multiple workers must produce
+    # byte-for-byte identical HudSamples to the single-worker (in-process)
+    # path -- chunk order is preserved on concatenation, and the
+    # session_id assignment pass runs once, sequentially, over the merged
+    # result.
+    timer_templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
+    combo_templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+    combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
+    popup_digit_templates = hud_reader.load_digit_templates(config.POPUP_DIGITS_DIR)
+    popup_label_template = hud_reader.load_image(config.POPUP_LABEL_TEMPLATE_PATH)
+
+    sequential = hud_reader.sample_video(
+        Path(VIDEO_PATH),
+        timer_templates,
+        combo_templates,
+        combo_label_template,
+        popup_digit_templates,
+        popup_label_template,
+        max_workers=1,
+    )
+    parallel = hud_reader.sample_video(
+        Path(VIDEO_PATH),
+        timer_templates,
+        combo_templates,
+        combo_label_template,
+        popup_digit_templates,
+        popup_label_template,
+        max_workers=2,
+    )
+
+    assert sequential
+    assert parallel == sequential

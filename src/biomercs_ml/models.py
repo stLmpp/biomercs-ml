@@ -15,6 +15,15 @@ class HudSample:
 
 
 @dataclass
+class RawHudSample:
+    timestamp_s: float
+    timer_value_s: float | None
+    combo_value: int | None
+    confidence: float
+    pickup_popup: bool = False
+
+
+@dataclass
 class KillGroup:
     session_id: int
     timestamp_s: float
