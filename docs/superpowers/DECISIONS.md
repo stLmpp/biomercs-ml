@@ -884,3 +884,57 @@ and "further follow-up" entries above) for the six under-curated
 digits. This is very likely the highest-leverage remaining fix in the
 whole project at this point -- worth doing before trusting any further
 Bug A/B/C/D classification work.
+
+## 2026-09-18 (later still) — Extended multi-sample curation to the
+## six under-curated digits; real but partial improvement, diminishing
+## returns without more source material
+
+Scanned both already-downloaded YouTube videos (not the screenshot
+zips -- see below for why) for real, low-combo frames covering digits
+`1, 2, 4, 6, 8, 9`, visually verified each candidate against the
+actual frame before accepting it (several of `read_combo`'s own
+"low-confidence-looking-plausible" readings during the search turned
+out to themselves be misreads, e.g. a frame the old code would've
+called `120` was actually `129`; `104` was actually `134`) -- a
+reminder that even a value under 150 isn't automatically trustworthy,
+just plausible. Added real-footage samples: `1` (+2), `2` (+3), `4`
+(+1), `6` (+1), `9` (+1). **No real-footage "8" occurrence was found
+in either full video** even at a very low confidence threshold (0.55)
+-- "8" genuinely seems rare in the sampled stretches, or is
+compensated for as some other misread wherever it does appear.
+Fell back to one supplementary sample cropped from
+`COMBO_ORIGINAL_TEXTURE.png` (the atlas, same as the earlier 0/3/5/7
+work used as one-of-several) for `8` only.
+
+**Why videos, not the crisp screenshot zips, as the primary source
+again:** same lesson as the 2026-09-18 "second, nested version"
+entry above -- template samples must come from the same
+capture/compression pipeline as what they're matched against, and
+crisp 1920x1080 screenshots don't.
+
+**Verified real, if partial, improvement:** an independent (not used
+as a template source) frame at video 2 t=409.2s reads a correct
+`106` post-curation (both the "1" and "6" digits right). But another
+independent frame (video 1, t=252.4s, true value `064`) still
+misreads its tens digit ("6" read as "0") -- with only 2 samples for
+`6` (vs. 4-5 for the fully-curated `0/3/5/7`), coverage is thinner and
+not yet as robust. The original adversarial frame that surfaced this
+whole finding (t=124.0s, true `029`) **still misreads as `889`** even
+with the new samples added -- the new `0`/`2` samples score *worse*
+against this specific frame than the existing ones already did, so
+the per-digit max never changes. This may be the same class of
+one-off "accepted pixel-level limit" as the t=408.8s overexposed frame
+from the fifth root cause, or may just need yet more sample diversity
+-- not conclusively determined either way. Either way it's caught
+downstream by `MAX_PLAUSIBLE_COMBO_VALUE` regardless of the raw match.
+
+**Stopping here rather than continuing to hunt for more samples**:
+diminishing returns without new source material (both zips are now
+fully mined for this video pair's low-combo stretches), and the
+existing safety nets (`MAX_PLAUSIBLE_COMBO_VALUE`, the group-size cap,
+the reversion check) already catch what curation alone couldn't fix
+this round. **Next step: re-run the pipeline on both videos and
+re-review from scratch** -- that's the real test of how much all of
+this session's fixes (Bug C, Bug D, the combo cap, and this partial
+curation) moved the needle together, rather than continuing to
+chase individual frames in isolation.
