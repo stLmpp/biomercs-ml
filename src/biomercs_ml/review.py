@@ -25,6 +25,25 @@ def parse_review_answer(answer: str) -> ReviewAnswer:
     return ReviewAnswer(outcome="skip")
 
 
+def normalize_review_answer(
+    answer: ReviewAnswer, detected_n_bonus: int, detected_n_bullet: int
+) -> ReviewAnswer:
+    # label_kind is fully deterministic from (n_bonus, n_bullet) (see
+    # auto_labeler.label_kill_group), so a "correction" that numerically
+    # matches what was already detected isn't a correction at all -- the
+    # reviewer meant "y" and typed the counts instead (an easy mistake
+    # under review's own y/n/<bonus>/<bullet> input format). Collapse it
+    # to a plain "y" so it can't silently record an actually-correct
+    # clip as incorrect.
+    if (
+        answer.outcome == "n"
+        and answer.true_n_bonus == detected_n_bonus
+        and answer.true_n_bullet == detected_n_bullet
+    ):
+        return ReviewAnswer(outcome="y")
+    return answer
+
+
 @dataclass
 class ReviewTally:
     history: list[str] = field(default_factory=list)

@@ -1311,3 +1311,52 @@ review pass of the fresh clips across all three videos -- that's the
 real test of whether this closes the accuracy gap the way Bug A's fix
 was meant to, and needs the user actually watching clips, not something
 to attempt unattended. See HANDOFF.md.
+
+## 2026-09-18 (accuracy, resumed once more) — Manual review of the fix's
+## clips: id=3 fixed exactly as intended; found and fixed a real data-entry
+## gap in the review tooling itself
+
+**User reviewed all 11 fresh clips** (`scripts/review_sample.py` against
+the `after` A/B manifests) -- **3/11 correct (27.3%)**, roughly flat vs.
+the prior 3/10 baseline, which is expected: this fix only targeted
+`group_size` fabrication, not every bug class in the dataset.
+
+- **`id=3` (the fix's primary target): now correct.** Confirms the fix
+  works exactly as designed.
+- **`id=4`: still wrong, but meaningfully closer** -- true `(2,0)`,
+  detected now `(1,0)` (was `(1,4)` before the fix). Exactly the
+  known limitation flagged in the fix's own test comment: the
+  reconstructed value from available samples is 1, not the true 2,
+  which needs the actual clip video to fully recover.
+- **video1 `id=1`/`id=2`, all of video2: unchanged, as the A/B diff
+  predicted** -- different bug classes (the already-catalogued t=62.2
+  phantom/Bug-B residual, and the already-documented t=124.0
+  frame-math-vs-actually-watching-the-clip discrepancy from a prior
+  session), untouched by this fix, not new.
+- **video3's newly-recovered clip (`id=1`, t=536.5): wrong, true
+  `(1,0)` vs. detected `mixed(1,1)`** -- the fix correctly recovered
+  a previously-*entirely-dropped* group (the old code silently lost
+  it to the implausible-jump cap), but overshot by one spurious
+  bullet kill. Recovering real-but-imperfect data is still a net
+  improvement over losing the event outright, but not a full fix.
+
+**Found and fixed a distinct, real bug in the review tooling itself
+during this pass:** the user typed a `<bonus>/<bullet>` correction
+(`1/0`) meaning to type `y` -- the values happened to exactly match
+what was already detected. `parse_review_answer` had no way to notice
+this: it always treats a numeric correction as `outcome="n"`
+regardless of whether the numbers match the record's own detection,
+so this silently recorded an *actually-correct* clip as incorrect.
+Confirmed via `auto_labeler.label_kill_group` that `label_kind` is
+fully deterministic from `(n_bonus, n_bullet)`, so a correction that
+numerically matches the detection is unambiguous -- not a real
+correction, and safe to normalize to "y" automatically. **Fixed:**
+`review.normalize_review_answer(answer, detected_n_bonus,
+detected_n_bullet)` collapses this case; wired into
+`scripts/review_sample.py`'s call site (`normalize_review_answer(
+parse_review_answer(answer), record["n_bonus"], record["n_bullet"])`).
+TDD'd (3 new tests), **101 tests total**. The one already-bad row from
+this session (video3 `id=2`, t=557.8) was hand-corrected directly in
+the manifest (`review_correct=1`, true fields cleared) since it
+predates this fix and the interactive session that produced it had
+already ended.

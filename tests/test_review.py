@@ -1,4 +1,4 @@
-from biomercs_ml.review import ReviewTally, parse_review_answer
+from biomercs_ml.review import ReviewTally, normalize_review_answer, parse_review_answer
 
 
 def test_review_tally_counts_correct_incorrect_and_skipped():
@@ -69,3 +69,34 @@ def test_parse_review_answer_falls_back_to_skip_for_unrecognized_input():
 
     garbage = parse_review_answer("maybe")
     assert garbage.outcome == "skip"
+
+
+def test_normalize_review_answer_collapses_a_correction_matching_the_detected_counts_to_y():
+    # A reviewer typing "1/0" when the clip already detected (1, 0) meant
+    # the same thing as "y" -- label_kind is fully deterministic from
+    # (n_bonus, n_bullet) (see auto_labeler.label_kill_group), so a
+    # correction that numerically matches the detection is unambiguously
+    # a "correct" verdict, not a real correction.
+    answer = parse_review_answer("1/0")
+    normalized = normalize_review_answer(answer, detected_n_bonus=1, detected_n_bullet=0)
+    assert normalized.outcome == "y"
+    assert normalized.true_n_bonus is None
+    assert normalized.true_n_bullet is None
+
+
+def test_normalize_review_answer_keeps_a_correction_that_differs_from_the_detected_counts():
+    answer = parse_review_answer("1/2")
+    normalized = normalize_review_answer(answer, detected_n_bonus=0, detected_n_bullet=2)
+    assert normalized.outcome == "n"
+    assert normalized.true_n_bonus == 1
+    assert normalized.true_n_bullet == 2
+
+
+def test_normalize_review_answer_leaves_plain_y_and_n_untouched():
+    y = normalize_review_answer(parse_review_answer("y"), detected_n_bonus=1, detected_n_bullet=0)
+    assert y.outcome == "y"
+
+    n = normalize_review_answer(parse_review_answer("n"), detected_n_bonus=1, detected_n_bullet=0)
+    assert n.outcome == "n"
+    assert n.true_n_bonus is None
+    assert n.true_n_bullet is None

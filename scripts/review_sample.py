@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from biomercs_ml import dataset_manifest
-from biomercs_ml.review import ReviewTally, parse_review_answer
+from biomercs_ml.review import ReviewTally, normalize_review_answer, parse_review_answer
 
 COLUMNS = [
     "id", "clip_path", "label_kind", "n_bonus", "n_bullet",
@@ -61,7 +61,9 @@ def main() -> None:
             index -= 1
             continue
 
-        parsed = parse_review_answer(answer)
+        parsed = normalize_review_answer(
+            parse_review_answer(answer), record["n_bonus"], record["n_bullet"]
+        )
         tally.record(parsed.outcome)
         if parsed.outcome != "skip":
             dataset_manifest.record_review(
