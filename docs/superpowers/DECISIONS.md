@@ -587,3 +587,140 @@ found something more severe than expected, not yet root-caused:**
 **Not yet root-caused.** Deliberately stopped here to log findings
 rather than start a new multi-session investigation immediately -- see
 HANDOFF.md for the reproduction recipe and concrete next steps.
+
+## 2026-09-18 (later) — Frame-by-frame tracing of the 8 wrong video-2
+## clips finds THREE distinct root causes, not one
+
+Followed the previous entry's "start here" pointer: traced clip id=8
+(t=193.0, detected `(0,1)` vs actual `(1,0)`, group_size already
+correct at 1) frame-by-frame at native 60fps (not just the 0.2s
+sampling grid) using `hud_reader.read_timer`/`read_combo` directly.
+Result was clean and conclusive, and tracing two more of the eight
+wrong clips this way surfaced two further, independent bugs. All three
+are real, evidenced, and none is the "session fragmentation" story the
+previous entry speculated as the likely single cause -- that
+speculation was wrong, or at best only one contributor among three.
+
+**Bug A -- the combo counter animates for ~350ms after a kill; the
+timer changes in a single frame. `detect_kill_groups`'s core
+assumption (a kill's combo delta and timer delta land in the same
+adjacent-sample-pair) is false whenever the two are more than one
+sample tick apart.** Confirmed on id=8 at frame granularity: the timer
+jumps instantly 262->267 at frame 11557 (t=192.617). The combo digits
+enter a visible roll/pop animation at the same frame, rendering a
+sequence of transient values over the next ~21 frames (`None, None, 0,
+0, 10, 10, 40, 40, ...`) before settling on the true 849 at frame
+11578 (t=192.967) -- a real on-screen animation, not compression
+noise (values like `10`/`40` are plausible odometer-style intermediate
+frames, not the digit-confusion pairs seen elsewhere in this file). The
+0.2s sampling grid's tick at t=192.6 lands one frame after the timer's
+jump but before the combo animation starts, so that tick reads
+`timer=267, combo=848` (stale combo). The next tick at t=193.0 is where
+the combo animation has settled, reading `timer=267, combo=849` (timer
+unchanged since the previous tick, because it only ticks down once per
+real second and 0.4s hasn't elapsed). `detect_kill_groups` pairs these
+two ticks, sees a correct `group_size=1` but a *zero* timer delta,
+and hands `auto_labeler` a `bonus_kill` that looks like a pure
+`bullet_kill` -- exactly id=8's `(0,1)` vs `(1,0)` mismatch. This
+generalizes to any case where `timer_before_s == timer_after_s` despite
+a real bonus kill (also seen at id=10, t=492.4, before bug C below is
+even considered).
+
+**Bug B -- persistent (not transient) high-confidence digit misreads
+during chaotic combat, on digit pairs beyond the already-fixed "0 vs
+8/9".** Frame-by-frame trace of id=6 (t=181.2, detected group_size=4,
+`timer_before_s=259 > timer_after_s=258` -- a *decreasing* timer
+supposedly co-occurring with a kill, itself a red flag) shows the
+combo's hundreds digit flickering between "8" and "9" and its ones
+digit flickering among "5"/"6"/"9" for nearly a full second
+(t=180.8-181.7s) at confidence 0.75-0.83 -- comfortably over
+`DIGIT_MATCH_MIN_CONFIDENCE` -- while the true value (845) never
+actually changes and the timer counts down normally with no bonus.
+Unlike the already-fixed fifth root cause (a data-quality problem
+in the "0" template specifically) or bug A above (an animation, over
+in ~350ms), this is a *sustained*, multi-tick, high-confidence
+misread under what's visibly motion-blur/particle-heavy footage --
+same chaotic-combat class noted in every hard bug this project has
+found, but not yet template-fixed for this digit pair.
+
+**Bug C -- a session split defeats the existing transient-misread
+persistence guard, because the guard only ever looks at
+`session_samples[i-1]` (the previous sample *within the same
+session_id*).** Traced id=10 (t=492.4): at t=491.8 (still session 238)
+combo is a stable, correct 187. A timer misread (`488 -> 482`, a
+6-second drop) triggers `is_new_session` and starts session 239. That
+new session's *first* sample (t=492.2) reads `combo=181` -- itself a
+transient misread, since the very next sample (t=492.4, still session
+239) reads the correct 187 again, with no real kill in between. This
+is exactly the kind of dip the existing "transient-dip" guard in
+`detect_kill_groups` (`session_samples[i-1].combo_value >= curr.
+combo_value`) was built to catch -- but that guard requires `i > 0`,
+and this misread landed at `i=0` of a newly-split session, so there is
+no `session_samples[-1]` to check against. The `181 -> 187` "rise" is
+then reported as a fabricated `group_size=6` kill group. This is a
+structural gap, not a tuning issue: *any* misread severe enough to
+trigger a spurious session split will, by construction, land at index
+0 of the new session and automatically evade the i>0-only guard,
+regardless of how good the guard's threshold is.
+
+**Not yet decided how to fix any of these -- three different problems,
+three different candidate fixes, needs the user's steer on scope/order
+before implementing anything:**
+- Bug A points at `event_detector`/`auto_labeler` needing to look
+  beyond a single adjacent-sample pair for the timer delta (e.g. search
+  a short forward/backward window around the combo-rise tick for the
+  timer's own delta, mirroring how the reversion/pickup checks already
+  search a window instead of one tick).
+- Bug B needs the same template-curation treatment as the fifth root
+  cause (more/better real-footage samples for the "8"/"9" hundreds
+  digit and the "5"/"6"/"9" ones digit under motion blur), not a
+  logic change.
+- Bug C needs the transient-dip guard to look at the *global* sample
+  sequence (like the pickup and reversion checks already do via
+  `all_samples`) instead of `session_samples[i-1]`, so it isn't blind
+  at session boundaries.
+None of the three explains 100% of the 8 wrong clips alone -- worth
+re-classifying all 8 (and video 1, still unreviewed with the
+correction-capable script) against these three buckets before deciding
+what to implement first, rather than assuming they're evenly split.
+
+## 2026-09-18 (later still) — Bug C fixed: transient-dip guard now
+## looks across session boundaries
+
+User picked Bug C to fix first (smallest, most self-contained of the
+three, TDD-able directly against the real id=10 case). Root cause was
+exactly as diagnosed above: the guard compared `curr` against
+`session_samples[i - 1]`, which only exists for `i > 0`. Fixed by
+introducing `_preceding_combo_value(all_samples, timestamp_s)` -- finds
+the combo value of the chronologically-nearest sample strictly before a
+given timestamp across the *full* sample list (like the existing
+pickup/reversion checks already do), not just within the current
+session's own list -- and using that in place of
+`session_samples[i - 1]`.
+
+- Considered: special-casing `i == 0` to look up the last sample of
+  the previous session_id specifically (rejected -- more code, and
+  redundant: since a session's samples are always a contiguous
+  chronological block of `all_samples` by construction, "nearest
+  sample strictly before `prev.timestamp_s`, globally" is *exactly*
+  equal to `session_samples[i - 1]` whenever `i > 0` anyway, so one
+  general helper replaces the special case instead of sitting next to
+  it).
+- Falls back to the old i>0-only behavior automatically when a caller
+  doesn't pass `all_samples` (defaults to `session_samples`, so with no
+  broader context there's nothing before session_samples[0] to find).
+- Verified against real footage: re-ran `detect_kill_groups` over all
+  of video 2's cached real samples before and after the fix and diffed
+  the two full group lists. Exactly one group was removed --
+  `(session=239, t=492.4, group_size=6)`, the exact phantom this fix
+  targeted -- and nothing else changed, confirming the fix is
+  surgical, not just passing its own unit tests.
+- Two new tests in `test_event_detector.py`: one reproducing the real
+  id=10 dip-at-a-session-boundary pattern (must be dropped), one
+  proving a genuine rise at the start of a new session is still kept
+  when the prior session's last value is genuinely lower (must not
+  regress into over-dropping every session's first group).
+
+Bugs A and B (combo-animation/instant-timer desync, and the
+sustained 8-vs-9/5-vs-6-vs-9 digit misread under chaotic footage) are
+still open -- see the previous entry.

@@ -205,3 +205,39 @@ def test_detect_kill_groups_drops_a_real_overexposed_frames_misread():
     groups = event_detector.detect_kill_groups(session, session_id=0)
 
     assert groups == []
+
+
+def test_detect_kill_groups_drops_a_rise_that_is_just_recovery_from_a_dip_at_a_session_boundary():
+    # Real footage (video 2, ~t=492.2s): a timer misread triggered a
+    # spurious new session right where a transient combo misread also
+    # landed. The existing transient-dip guard only ever looks at
+    # `session_samples[i-1]` -- the previous sample *within this
+    # session* -- so it can never fire for `i=0`, the first sample of a
+    # newly-split session, even though the misread pattern (a dip that
+    # immediately recovers to the true, unchanged value) is identical
+    # to the case the guard already handles at `i>0`. See
+    # DECISIONS.md, "bug C".
+    prior_session = [_sample(0.0, 488.0, 187, session_id=238)]
+    new_session = [
+        _sample(0.4, 482.0, 181, session_id=239),  # transient misread
+        _sample(0.6, 482.0, 187, session_id=239),  # recovers to the true, unchanged value
+    ]
+    all_samples = prior_session + new_session
+
+    groups = event_detector.detect_kill_groups(new_session, session_id=239, all_samples=all_samples)
+
+    assert groups == []
+
+
+def test_detect_kill_groups_keeps_a_genuine_rise_at_the_start_of_a_new_session():
+    prior_session = [_sample(0.0, 488.0, 175, session_id=238)]
+    new_session = [
+        _sample(0.4, 482.0, 181, session_id=239),
+        _sample(0.6, 482.0, 187, session_id=239),  # a real +6 kill group
+    ]
+    all_samples = prior_session + new_session
+
+    groups = event_detector.detect_kill_groups(new_session, session_id=239, all_samples=all_samples)
+
+    assert len(groups) == 1
+    assert groups[0].group_size == 6

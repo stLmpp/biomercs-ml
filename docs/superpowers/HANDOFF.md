@@ -2,9 +2,82 @@
 
 Paste this whole file as your first message in a new session to continue.
 
-## Status as of 2026-09-18 (read this first -- supersedes everything
-## below, including the 2026-09-17 sections; they're historical context
-## now, not the current next step)
+## Status as of 2026-09-18 (later) (read this first -- supersedes
+## everything below, including the earlier 2026-09-18 and 2026-09-17
+## sections; they're historical context now, not the current next step)
+
+Picked up exactly where the previous status left off ("Start here next
+session: pick... id=8"). Frame-by-frame traced id=8 plus two more of
+the 8 wrong video-2 clips and found **three distinct, independently
+confirmed root causes** — not the single "session fragmentation" story
+the previous status speculated. Full evidence and reasoning for each:
+`docs/superpowers/DECISIONS.md`, entry "Frame-by-frame tracing of the
+8 wrong video-2 clips finds THREE distinct root causes, not one".
+**Nothing has been implemented yet** — this is investigation-only,
+same "stop and get explicit approval before implementing" pattern as
+every previous fix in this project.
+
+- **Bug A (confirmed via native-60fps frame trace, id=8):** the combo
+  counter has a ~350ms roll/pop animation after a kill, but the timer
+  changes in a single frame. `detect_kill_groups` assumes both land in
+  the same adjacent-sample-pair; when they don't, the timer delta
+  reads as zero even though a real bonus happened, mislabeling
+  `bonus_kill` as `bullet_kill`.
+- **Bug B (confirmed via native-60fps frame trace, id=6):** a
+  *sustained* (near-1-second), high-confidence (0.75-0.83) misread of
+  the combo's hundreds digit ("8"/"9") and ones digit ("5"/"6"/"9")
+  during chaotic/motion-blurred combat — a template-quality gap like
+  the already-fixed fifth root cause, but a different digit pair, and
+  long enough that no existing transient/voting guard could catch it.
+- **Bug C (confirmed via 0.2s-grid trace, id=10 at t=492.4):** the
+  existing transient-dip guard in `detect_kill_groups`
+  (`session_samples[i-1].combo_value >= curr.combo_value`) only checks
+  the previous sample *within the same session*. A misread severe
+  enough to also trigger a spurious session split lands at index 0 of
+  the new session, where there is no `i-1` — so the guard is
+  structurally blind at exactly the moments session-splitting misreads
+  happen.
+
+**Bug C is now fixed** (`_preceding_combo_value` looks across session
+boundaries instead of `session_samples[i-1]` — see DECISIONS.md, "Bug
+C fixed" entry). Verified against real footage: re-running
+`detect_kill_groups` over all of video 2's cached samples removed
+exactly the one phantom group this fix targeted (`session=239,
+t=492.4`) and nothing else. Tests not yet re-run through the full
+pipeline / re-reviewed end to end this session — see "Start here next
+session" below.
+
+**Bugs A and B are still open, not yet implemented:**
+- **Bug A** (combo-counter ~350ms pop animation vs. the timer's
+  single-frame jump landing in different sample ticks) needs a design
+  decision: how should `detect_kill_groups`/`auto_labeler` search for
+  the timer delta across a small window instead of trusting one
+  adjacent-tick pair. Bigger architectural change than Bug C was.
+- **Bug B** (sustained "8"/"9" hundreds-digit and "5"/"6"/"9"
+  ones-digit misreads under chaotic/motion-blurred combat) needs
+  template curation, same pattern as the already-fixed fifth root
+  cause, not a logic change.
+
+**Start here next session:** re-run the full pipeline on both videos
+with Bug C's fix in place, re-review, and see how much of the
+remaining wrongness Bug A vs. Bug B each account for before deciding
+which to tackle next — the user has not yet been asked to prioritize
+between them. Also worth re-classifying all 8 of video 2's originally-
+wrong clips (and video 1, still unreviewed with the correction-capable
+script) against these two remaining buckets.
+
+**Reproduction:** same recipe as below (video 2, `/tmp/biomercs-footage2/source.mp4`).
+This session additionally used raw frame-by-frame reads (bypassing
+`sample_video`'s 0.2s grid and majority vote entirely) via
+`hud_reader.read_timer`/`read_combo` called directly per-frame with
+`cv2.VideoCapture` stepping one frame at a time — needed to see bug A's
+animation, which a 0.2s-grid trace alone would never reveal. Recreate
+with `cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)` then loop
+`cap.read()` once per frame, matching the frame-by-frame scripts
+mentioned lower in this file.
+
+## Status as of 2026-09-18, earlier (superseded by the above -- kept
+## for history)
 
 **The fifth root cause (combo digit "0" losing to "8"/"9") is now
 fixed** (multi-sample template architecture implemented, real

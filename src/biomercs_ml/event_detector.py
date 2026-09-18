@@ -10,6 +10,13 @@ def _pickup_nearby(session_samples: list[HudSample], timestamp_s: float) -> bool
     )
 
 
+def _preceding_combo_value(all_samples: list[HudSample], timestamp_s: float) -> int | None:
+    preceding = [sample for sample in all_samples if sample.timestamp_s < timestamp_s]
+    if not preceding:
+        return None
+    return max(preceding, key=lambda sample: sample.timestamp_s).combo_value
+
+
 def _reverts_to_pre_rise_value(
     all_samples: list[HudSample], after_timestamp_s: float, pre_rise_value: int
 ) -> bool:
@@ -43,9 +50,17 @@ def detect_kill_groups(
         # doesn't always catch a misread streak longer than its burst)
         # is ignored as a drop, but the next sample recovering to the
         # true, unchanged value then looks like a real rise. If the
-        # sample before `prev` already matched (or exceeded) `curr`,
-        # this is just recovery from that dip, not a new kill group.
-        if i > 0 and session_samples[i - 1].combo_value >= curr.combo_value:
+        # sample immediately before `prev` already matched (or
+        # exceeded) `curr`, this is just recovery from that dip, not a
+        # new kill group. Looked up via `pickup_search_samples` (the
+        # full, session-agnostic timeline), not `session_samples[i-1]`
+        # -- a misread severe enough to also trigger a spurious session
+        # split lands at `i=0` of the new session, where there is no
+        # in-session predecessor to check, even though the same dip
+        # pattern is present one step further back across the session
+        # boundary. See DECISIONS.md, "bug C".
+        preceding_combo_value = _preceding_combo_value(pickup_search_samples, prev.timestamp_s)
+        if preceding_combo_value is not None and preceding_combo_value >= curr.combo_value:
             continue
         # The combo counter only ever increases during a session (a
         # rare genuine reset drops toward zero, it doesn't dip and
