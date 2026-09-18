@@ -26,17 +26,29 @@ def create_db(db_path: Path) -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(clips)")}
         if "review_correct" not in columns:
             conn.execute("ALTER TABLE clips ADD COLUMN review_correct INTEGER")
+        if "review_true_n_bonus" not in columns:
+            conn.execute("ALTER TABLE clips ADD COLUMN review_true_n_bonus INTEGER")
+        if "review_true_n_bullet" not in columns:
+            conn.execute("ALTER TABLE clips ADD COLUMN review_true_n_bullet INTEGER")
         conn.commit()
     finally:
         conn.close()
 
 
-def record_review(db_path: Path, clip_id: int, correct: bool) -> None:
+def record_review(
+    db_path: Path,
+    clip_id: int,
+    correct: bool,
+    true_n_bonus: int | None = None,
+    true_n_bullet: int | None = None,
+) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
-            "UPDATE clips SET review_correct = ? WHERE id = ?",
-            (1 if correct else 0, clip_id),
+            """UPDATE clips
+               SET review_correct = ?, review_true_n_bonus = ?, review_true_n_bullet = ?
+               WHERE id = ?""",
+            (1 if correct else 0, true_n_bonus, true_n_bullet, clip_id),
         )
         conn.commit()
     finally:
@@ -72,6 +84,17 @@ def fetch_random_sample(db_path: Path, n: int) -> list[tuple]:
     conn = sqlite3.connect(db_path)
     try:
         cursor = conn.execute("SELECT * FROM clips ORDER BY RANDOM() LIMIT ?", (n,))
+        return cursor.fetchall()
+    finally:
+        conn.close()
+
+
+def fetch_reviewed_incorrect(db_path: Path) -> list[tuple]:
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT * FROM clips WHERE review_correct = 0 ORDER BY event_timestamp_s"
+        )
         return cursor.fetchall()
     finally:
         conn.close()
