@@ -63,18 +63,15 @@ def test_detect_kill_groups_keeps_a_group_at_the_one_in_a_million_ceiling():
     assert len(groups) == 1
 
 
-def test_detect_kill_groups_does_not_discount_confidence_for_a_plausible_group_size():
-    session = [_sample(0.0, 100.0, 5, conf=0.8), _sample(0.2, 99.8, 8, conf=0.7)]  # +3
+def test_detect_kill_groups_confidence_is_the_min_of_the_pairs_raw_confidence():
+    # A same-kind-count rarity discount belongs to auto_labeler now (it's
+    # the only place that knows the bonus/bullet split -- see
+    # config.BONUS_COUNT_CONFIDENCE_FACTOR/BULLET_COUNT_CONFIDENCE_FACTOR)
+    # -- event_detector reports the raw digit-read confidence undiscounted,
+    # regardless of group_size.
+    session = [_sample(0.0, 100.0, 5, conf=0.8), _sample(0.2, 95.0, 11, conf=0.7)]  # +6
     groups = event_detector.detect_kill_groups(session, session_id=0)
     assert groups[0].confidence == 0.7
-
-
-def test_detect_kill_groups_discounts_confidence_for_a_rare_group_size():
-    # 6 simultaneous kills is rare -- the reported confidence should
-    # reflect that prior, not just the raw digit-read confidence.
-    session = [_sample(0.0, 100.0, 5, conf=0.8), _sample(0.2, 95.0, 11, conf=0.8)]  # +6
-    groups = event_detector.detect_kill_groups(session, session_id=0)
-    assert groups[0].confidence == 0.8 * 0.55
 
 
 def test_detect_kill_groups_drops_a_rise_that_is_just_recovery_from_a_transient_dip():

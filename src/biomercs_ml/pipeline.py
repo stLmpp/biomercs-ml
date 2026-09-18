@@ -53,6 +53,6 @@ def run(video_source: str, output_dir: Path, db_path: Path) -> None:
                 source_video=str(video_path),
                 session_id=session_id,
                 event_timestamp_s=group.timestamp_s,
-                confidence=group.confidence,
+                confidence=label.confidence,
             )
             dataset_manifest.insert_clip(db_path, record)

@@ -88,22 +88,38 @@ CALIBRATION_MIN_VOTES = 3
 # real group.
 MAX_PLAUSIBLE_GROUP_SIZE = 8
 
-# A larger simultaneous-kill group is real-world rarer than a small one
-# (per the author's own top-level competitive experience), so a group's
+# A larger same-kind kill count is real-world rarer than a small one
+# (per the author's own top-level competitive experience), so a label's
 # reported confidence should reflect that prior on top of its raw
 # digit-read confidence, not just a hard yes/no cutoff at
-# MAX_PLAUSIBLE_GROUP_SIZE. Purely informational today (nothing filters
-# on it automatically) -- it sharpens the signal already shown during
-# manual review.
-GROUP_SIZE_CONFIDENCE_FACTOR: dict[int, float] = {
+# MAX_PLAUSIBLE_GROUP_SIZE. Purely informational (nothing filters on it
+# automatically) -- it sharpens the signal already shown during manual
+# review. Bullet kills are strictly rarer than bonus kills at the same
+# count in a good run (Wesker's dash-finisher meta makes bullet-only
+# kills uncommon -- see DECISIONS.md, manual review found real
+# n_bullet=0 in every wrong clip this session), so bonus and bullet get
+# separate tables rather than one shared by raw group_size -- see
+# auto_labeler.label_kill_group, the only place that knows the
+# bonus/bullet split.
+BONUS_COUNT_CONFIDENCE_FACTOR: dict[int, float] = {
     1: 1.0,
     2: 1.0,
     3: 1.0,
-    4: 0.9,
-    5: 0.75,
-    6: 0.55,
-    7: 0.35,
-    8: 0.15,
+    4: 0.90,
+    5: 0.50,
+    6: 0.15,
+    7: 0.10,
+    8: 0.05,
+}
+BULLET_COUNT_CONFIDENCE_FACTOR: dict[int, float] = {
+    1: 1.0,
+    2: 1.0,
+    3: 0.80,
+    4: 0.60,
+    5: 0.40,
+    6: 0.20,
+    7: 0.10,
+    8: 0.05,
 }
 
 # A transient single-frame digit misread (e.g. compression noise

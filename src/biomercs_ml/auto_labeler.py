@@ -23,4 +23,10 @@ def label_kill_group(
         kind = "bullet_kill"
     else:
         kind = "mixed"
-    return KillLabel(kind=kind, n_bonus=n_bonus, n_bullet=n_bullet)
+
+    confidence = (
+        group.confidence
+        * config.BONUS_COUNT_CONFIDENCE_FACTOR.get(n_bonus, 1.0)
+        * config.BULLET_COUNT_CONFIDENCE_FACTOR.get(n_bullet, 1.0)
+    )
+    return KillLabel(kind=kind, n_bonus=n_bonus, n_bullet=n_bullet, confidence=confidence)

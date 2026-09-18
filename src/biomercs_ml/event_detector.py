@@ -139,8 +139,10 @@ def detect_kill_groups(
                 timer_before_s=timer_before_s,
                 timer_after_s=timer_after_s,
                 elapsed_s=curr.timestamp_s - prev.timestamp_s,
-                confidence=min(prev.confidence, curr.confidence)
-                * config.GROUP_SIZE_CONFIDENCE_FACTOR[group_size],
+                # Undiscounted raw digit-read confidence -- a same-kind-count
+                # rarity discount belongs to auto_labeler, the only place
+                # that knows the bonus/bullet split.
+                confidence=min(prev.confidence, curr.confidence),
             )
         )
     return groups

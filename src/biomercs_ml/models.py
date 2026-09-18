@@ -39,6 +39,7 @@ class KillLabel:
     kind: LabelKind
     n_bonus: int
     n_bullet: int
+    confidence: float
 
 
 @dataclass
