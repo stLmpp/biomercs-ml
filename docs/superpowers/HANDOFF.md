@@ -2,9 +2,72 @@
 
 Paste this whole file as your first message in a new session to continue.
 
+## Status as of 2026-09-18 (a fourth video) — new root cause found and
+## fixed: HUD offset calibration could lock onto the wrong offset for
+## an entire video if the pre-gameplay stretch outlasted its scan
+## budget. Verified via A/B diff on all four videos (videos 1-3
+## byte-identical, video4 went from 36->327 samples). **Start here next
+## session: manually review video4's fresh 6-clip set** (read this
+## first -- supersedes everything below)
+
+A fourth video was added this session for cross-validation (user's own
+call, after the group_size fix's review showed too little data --11
+clips across 3 videos -- to tell whether its remaining gaps were
+systematic). First run: 8 clips, 4/8 correct (50%, better than the
+prior 27.3%) but **every wrong clip was an overcount** -- the same
+group_size-overestimation signature, on fresh footage, that the
+previous fix was supposed to cover.
+
+**Root-caused the worst offender (`id=7`, t=606.4, detected 6, true
+1) and found a completely different bug**, not a gap in the group_size
+clamp fix: `prev` and `curr` were both individually correct, solid
+reads -- the problem was a **20.6-second gap with zero valid samples in
+between**, so however many real kills happened across it got lumped
+into one fabricated group. Traced further: `_calibrate_offset` scans
+sequentially from frame 0 and gives up after ~120s of video, but this
+video's gameplay doesn't start until t=146.9s (a "preparation lap"
+collecting time bonuses, per the user's own domain knowledge about run
+structure -- not just a menu/loading intro) -- calibration never saw a
+real gameplay frame and locked in the wrong `(0,0)` offset for the
+*entire* video, starving `is_valid_hud_frame` almost everywhere (only
+36 valid samples across 670s, vs. 2000+ on other videos).
+
+**Fixed on the user's own suggestion:** start the calibration scan
+from the video's midpoint instead of frame 0 (simpler than raising the
+scan budget, which would just push the same failure to a longer prep
+lap) -- by a run's midpoint, real combat is almost certainly
+happening. One-line change (`_calibrate_offset` itself scans forward
+from wherever its `cap` is positioned already, so `sample_video` just
+seeks first). TDD'd, **102 tests total**. Full detail:
+`docs/superpowers/DECISIONS.md`, entry "a fourth video,
+cross-validation".
+
+**Verified via a full stash/restore A/B diff across all four videos**
+(this touches every video's calibration, not just video4's): video4
+went from 36 to 327 samples (9x), clip count 8->6, composition changed
+substantially (the previously-fabricated `id=7` group at t=606.4 is
+gone). **Videos 1-3 produced byte-identical clip lists before and
+after** -- confirms the fix is surgical, zero effect outside the
+specific failure case.
+
+**Start here next session: manually review video4's fresh 6 clips**
+(`scripts/review_sample.py /tmp/biomercs-run4-fixed/manifest.sqlite` --
+re-run the pipeline first if this session's `/tmp` state is gone, see
+"Ephemeral files" below, video 4's URL is
+`https://www.youtube.com/watch?v=zIMN3UNyo2s`). The previous review
+round's data is stale now that the clip set itself changed. Also
+worth knowing about, but not investigated this session: video4's
+denser sample stream shows rapid session-id churn from timer noise in
+some chaotic stretches (e.g. sessions 401/406/408/409 within 30s) --
+this is the pre-existing, already-documented "timer-noise
+session-fragmentation" issue from much earlier sessions, not caused by
+or related to this session's fix.
+
 ## Status as of 2026-09-18 (accuracy, resumed once more) — the
 ## group_size fix reviewed: id=3 (its primary target) is now correct;
 ## id=4 improved but still short (true 2, detected 1); video3's
+## (superseded by the section above -- kept for the group_size fix's
+## own review-result detail, which the section above didn't repeat)
 ## newly-recovered clip is real but overshoots by one. Also found and
 ## fixed a real bug in the review tooling itself (a matching correction
 ## wasn't normalized to "y"). **Start here next session: root-cause
@@ -1086,6 +1149,10 @@ uv run yt-dlp -f 298 -o /tmp/biomercs-footage2/source.mp4 \
 mkdir -p /tmp/biomercs-footage3
 uv run yt-dlp -f 298 -o /tmp/biomercs-footage3/source.mp4 \
   "https://www.youtube.com/watch?v=8ilpJYjIRtQ"
+
+mkdir -p /tmp/biomercs-footage4
+uv run yt-dlp -f 298 -o /tmp/biomercs-footage4/source.mp4 \
+  "https://www.youtube.com/watch?v=zIMN3UNyo2s"
 ```
 
 Then regenerate manifests (deterministic — same code + same video means
@@ -1097,22 +1164,24 @@ missing directories, so re-running into a stale dir silently mixes old
 and new clips (bit the previous session once already):
 
 ```bash
-rm -rf /tmp/biomercs-run /tmp/biomercs-run2 /tmp/biomercs-run3
+rm -rf /tmp/biomercs-run /tmp/biomercs-run2 /tmp/biomercs-run3 /tmp/biomercs-run4
 uv run python -c "
 from pathlib import Path
 from biomercs_ml import pipeline
 pipeline.run('/tmp/biomercs-footage/source.mp4', Path('/tmp/biomercs-run'), Path('/tmp/biomercs-run/manifest.sqlite'))
 pipeline.run('/tmp/biomercs-footage2/source.mp4', Path('/tmp/biomercs-run2'), Path('/tmp/biomercs-run2/manifest.sqlite'))
 pipeline.run('/tmp/biomercs-footage3/source.mp4', Path('/tmp/biomercs-run3'), Path('/tmp/biomercs-run3/manifest.sqlite'))
+pipeline.run('/tmp/biomercs-footage4/source.mp4', Path('/tmp/biomercs-run4'), Path('/tmp/biomercs-run4/manifest.sqlite'))
 "
 ```
 
-Each `pipeline.run` currently takes **~8-9 minutes** on a ~10min video
-(`SAMPLE_VOTE_FRAMES` went 3->11 for Bug D, ~3.6x more per-tick work;
-partially offset by calibration's coarse-to-fine speedup). Progress
+Each `pipeline.run` now takes **~2 minutes** on a ~10min video (#6's
+CPU parallelization across `sample_video`, landed a few sessions ago --
+this paragraph is historical, kept for the older `SAMPLE_VOTE_FRAMES`/
+calibration-speedup context, not the current timing). Progress
 prints every ~10% of video duration processed (`hud_reader.
-sample_video`'s own logging, added this session so a run is never
-silent) — if implementing #6 (parallelization) this session, this
+sample_video`'s own logging, added a few sessions ago so a run is never
+silent) — this
 runtime should drop substantially; re-measure and update this note
 once it does.
 
