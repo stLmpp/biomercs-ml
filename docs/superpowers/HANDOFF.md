@@ -58,13 +58,30 @@ session" below.
   template curation, same pattern as the already-fixed fifth root
   cause, not a logic change.
 
-**Start here next session:** re-run the full pipeline on both videos
-with Bug C's fix in place, re-review, and see how much of the
-remaining wrongness Bug A vs. Bug B each account for before deciding
-which to tackle next — the user has not yet been asked to prioritize
-between them. Also worth re-classifying all 8 of video 2's originally-
-wrong clips (and video 1, still unreviewed with the correction-capable
-script) against these two remaining buckets.
+**Re-ran and re-reviewed video 2 with Bug C's fix in place.** 16 fresh
+clips, 9/16 correct (56%). The `t=492.4` phantom is confirmed gone.
+The other 7 of the original 8 wrong clips are still wrong, and
+frame-tracing all of them found the "Bug A vs Bug B" framing was
+itself incomplete — there's a **fourth distinct pattern** (rapid
+frame-to-frame flicker among many values, too fast/noisy for the
+existing 3-frame majority vote to filter, unlike Bug B's one sustained
+wrong value). Full classification of all 8 clips, with evidence, is in
+DECISIONS.md's newest entry. **Nothing further implemented yet** —
+stopped after classifying to get the user's steer on scope, same
+pattern as always.
+
+**Start here next session:** no fix chosen yet for Bug A, Bug B, or the
+new flicker pattern — ask the user which to tackle first (or in what
+order), per DECISIONS.md's "Updated tally" at the end of the newest
+entry. Video 1 still hasn't been reviewed with the correction-capable
+script at all.
+
+**Gotcha to remember:** `/tmp` output directories are *not* reliably
+cleared within a single ongoing session (only between sessions) —
+`/tmp/biomercs-run2` had 2026-09-16 rows still in it when re-run today,
+which silently mixed stale pre-fix clips into the first review pass.
+Always `rm -rf` the output dir (or use a fresh one) before re-running
+`pipeline.run` a second time in the same session.
 
 **Reproduction:** same recipe as below (video 2, `/tmp/biomercs-footage2/source.mp4`).
 This session additionally used raw frame-by-frame reads (bypassing

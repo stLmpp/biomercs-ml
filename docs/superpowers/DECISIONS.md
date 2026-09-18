@@ -724,3 +724,79 @@ session's own list -- and using that in place of
 Bugs A and B (combo-animation/instant-timer desync, and the
 sustained 8-vs-9/5-vs-6-vs-9 digit misread under chaotic footage) are
 still open -- see the previous entry.
+
+## 2026-09-18 (later still) — Re-ran the fixed pipeline, re-reviewed;
+## classified the remaining wrong clips, found a fourth distinct pattern
+
+Regenerated video 2's manifest with Bug C's fix in place and did a
+full manual review. **Caveat that cost real review time:** the output
+directory (`/tmp/biomercs-run2`) had leftover rows from a 2026-09-16
+session that were never cleared, so the first review pass mixed 51
+stale rows with 16 fresh ones -- always `rm -rf` the output dir (or use
+a new one) before re-running the pipeline in an existing session, ephemeral
+`/tmp` guidance notwithstanding (it only reliably clears between
+*sessions*, not within one). Filtering to just the fresh
+(`created_at`-dated 2026-09-18) rows: **16 clips, 9/16 correct (56%)**.
+The `t=492.4` phantom group Bug C targeted is confirmed gone. All 7
+remaining wrong clips are the same 7 (of the original 8) that Bug C
+was never expected to fix, every one still showing `review_true_
+n_bullet=0` (a true pure `bonus_kill` split into a bogus mix).
+
+Frame-by-frame traced the 5 of those 7 not already classified (id=8's
+t=193.0 was already Bug A; id=6's t=181.2 was already Bug B). Result:
+**neither Bug A nor Bug B alone explains the rest -- there's a fourth,
+distinct pattern.**
+
+- **t=37.0 and t=69.0: a variant of Bug B.** In both, the timer's own
+  bump lands correctly within the same adjacent-sample pair (ruling out
+  Bug A), but the combo's ones digit settles into a *sustained*,
+  high-confidence wrong reading for 2+ seconds afterward ("5"
+  misread as "6" at t=37.0; true ones-digit "2" misread as "8" at
+  t=69.0). At t=37.0 specifically, native-frame tracing shows the
+  correct value (`885`) actually renders for exactly one frame right
+  as the counter's pop animation finishes (frame 2218, t=36.967)
+  before immediately flipping to the sustained wrong `886` for every
+  frame after -- i.e. the misread isn't random chaotic-footage noise
+  like the t=181.2 case, it kicks in at the exact moment the animation
+  settles and then persists. Worth keeping in mind if Bug B's fix ends
+  up being template curation: samples right after an animation settle
+  may be a specific hard case worth its own template coverage, not
+  just "more real footage" in general.
+- **t=122.0: an extreme version of Bug A.** Two near-simultaneous
+  bonus kills land as a real `+9s` timer jump (`180->189`) at
+  t=119.8-120.2, but the combo counter's visible update doesn't settle
+  until t=121.0-122.0 -- a ~1.8-2s lag, roughly 5-6x longer than the
+  ~350ms lag measured for the single-kill case at t=193.0 (id=8).
+  Whatever fix Bug A gets needs a search window sized for multi-kill
+  chains, not just a single sample tick or two.
+- **t=522.0: a new, fourth pattern -- rapid, unsettled frame-to-frame
+  flicker that the existing 3-frame majority vote is too short to
+  filter.** Native-frame trace (t=521.7-522.5) shows the combo's ones
+  digit flickering among at least 5 different values (`185, 189, 195,
+  196, 199, 186`) essentially every frame, with no dominant "wrong"
+  reading the way t=181.2 or t=37.0 have -- and critically, the *true*
+  value (`185`) is actually one of the more common individual-frame
+  readings across the whole window, just not the plurality within the
+  specific 3-frame window `sample_video`'s burst happened to land on
+  for this tick. This isn't Bug B (no single stable wrong value to
+  fix templates against) and isn't Bug A (no animation-style
+  unreadable gap, no clean before/after settle) -- it's closer to the
+  original transient-misread problem `SAMPLE_VOTE_FRAMES=3` was built
+  to solve, just under noise heavy enough that a 3-frame window isn't
+  wide enough. **Not yet named "Bug D" formally or scoped -- needs the
+  user's read on whether this is worth solving separately (e.g. a
+  wider vote burst, at the cost of more decode work per tick) or is
+  rare/rare-adjacent enough to accept.**
+- **t=549.2: likely the same flicker pattern as t=522.0**, over a
+  longer, messier window (values `141/148/143/149` recurring across
+  ~4s with a mid-window sample gap, probably the kill-bonus popup
+  itself interfering with `is_valid_hud_frame`) -- not independently
+  frame-traced this session, inferred from the 0.2s-grid pattern
+  looking structurally the same as t=522.0's confirmed case.
+
+**Updated tally across all 8 originally-wrong video 2 clips:** 1 fixed
+by Bug C (t=492.4), 2 are Bug A (t=193.0 confirmed, t=122.0 an extreme
+variant), 3 are Bug B or a Bug-B variant (t=181.2, t=37.0, t=69.0), 2
+are the new flicker pattern (t=522.0 confirmed, t=549.2 inferred). No
+single fix covers the majority -- all three (or four) real causes need
+addressing to get video 2 close to the spec's >98% target.
