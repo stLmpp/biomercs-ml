@@ -240,3 +240,68 @@ def test_detect_kill_groups_keeps_a_genuine_rise_at_the_start_of_a_new_session()
 
     assert len(groups) == 1
     assert groups[0].group_size == 6
+
+
+def test_detect_kill_groups_finds_the_real_timer_jump_when_combo_animation_lags_one_tick():
+    # Real footage (video 2, id=8, t=193.0): the timer jumps in a single
+    # frame but the combo counter's roll/pop animation takes ~350ms to
+    # settle, so the tick where combo visibly changes (the pair
+    # detect_kill_groups pairs on) isn't the same tick where the timer's
+    # own jump landed -- by the time combo settles, the timer has
+    # already decayed for a tick with no visible change of its own,
+    # making a real bonus kill look like a zero timer delta. See
+    # DECISIONS.md, "Bug A".
+    session = [
+        _sample(0.0, 200.0, 10),  # pre-kill, stable
+        _sample(0.2, 205.0, 10),  # timer already jumped +5; combo still stale (animating)
+        _sample(0.4, 204.8, 11),  # combo settles; timer just decayed 0.2s as normal
+    ]
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert len(groups) == 1
+    group = groups[0]
+    assert group.group_size == 1
+    assert group.timer_before_s == 199.8
+    assert group.timer_after_s == 204.8
+
+
+def test_detect_kill_groups_finds_the_real_timer_jump_across_a_multi_tick_animation_lag():
+    # Real footage (video 2, t=122.0): two near-simultaneous kills push
+    # the timer jump ~2s ahead of where the combo counter's animation
+    # finally settles -- a longer lag than the single-kill case above,
+    # needing the search window to look back more than one tick.
+    session = [
+        _sample(0.0, 300.0, 20),  # pre-kill, stable
+        _sample(0.2, 310.0, 20),  # timer already jumped +10 (2 kills); combo still stale
+        _sample(0.4, 309.8, 20),  # still stale, mid-animation
+        _sample(0.6, 309.6, 22),  # combo settles at +2
+    ]
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert len(groups) == 1
+    group = groups[0]
+    assert group.group_size == 2
+    assert group.timer_before_s == 299.6
+    assert group.timer_after_s == 309.6
+
+
+def test_detect_kill_groups_ignores_an_implausible_timer_misread_inside_the_search_window():
+    # Real footage (video 2, ~t=549.0s): the timer-delta search window
+    # can contain an unrelated garbage misread (e.g. a wrong minutes
+    # digit reading 257 next to a cluster of real ~500 readings) that
+    # has nothing to do with this kill group. A blind min/max over the
+    # window lets that outlier win and reports an implausibly large
+    # delta, which then fails auto_labeler's tolerance check and drops
+    # a group that should have been kept. Bound window candidates by
+    # the already-trusted MAX_PLAUSIBLE_GROUP_SIZE-implied swing so an
+    # outlier this far from prev/curr's own value is excluded instead.
+    session = [
+        _sample(0.0, 500.0, 140),
+        _sample(0.2, 257.0, 140),  # garbage misread, same combo -- no group here
+        _sample(0.4, 496.0, 140),  # prev: normal decay from 500.0
+        _sample(0.6, 500.0, 148),  # curr: real +8 kill group
+    ]
+    groups = event_detector.detect_kill_groups(session, session_id=0)
+    assert len(groups) == 1
+    group = groups[0]
+    assert group.group_size == 8
+    assert group.timer_before_s == 496.0
+    assert group.timer_after_s == 500.0

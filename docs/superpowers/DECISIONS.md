@@ -1011,3 +1011,111 @@ session -- not re-downloaded):
 re-verified only; did not touch the paused accuracy investigation
 (Bug A, the new phantom-event pattern) -- see HANDOFF.md for why and
 what's next there.
+
+## 2026-09-18 (accuracy, resumed) — Phantom-event pattern root-caused
+## (not fixed, folds into Bug B); Bug A fixed via a timer-delta search
+## window, with a contamination guard found and fixed by real-footage
+## A/B testing
+
+**Phantom-event pattern (video 1, id=1, t=62.2) root-caused, not a new
+bug.** Frame-traced at native resolution: ground truth combo sits at
+`012` for the entire 58.4s-65.4s window -- no kill happens near t=62.2
+at all. Two compounding, already-catalogued causes, not a new
+mechanism:
+1. A mossy rock wall directly behind the (semi-transparent) combo
+   counter in this camera framing bleeds into the `DIGIT_SEARCH_MARGIN_PX`
+   crop for slots 0 and 2, and `cv2.matchTemplate`'s max-score search
+   occasionally prefers "8" over the true "0"/"2" -- confidence
+   0.62-0.75, past `DIGIT_MATCH_MIN_CONFIDENCE` but under the ~0.889
+   real-footage median. Sustained across several ticks (same wrong "18"
+   recurs), not transient -- this is **Bug B** (persistent high-confidence
+   misread under chaotic footage), just triggered by a static busy
+   background instead of motion blur/particles.
+2. Timer noise in the same window (`186->184->188->183->188->None->187...`
+   tick to tick) fires `is_new_session` repeatedly, fragmenting what
+   should be one session into many 1-tick sessions -- the
+   previously-flagged-but-never-fixed "session_id increments on nearly
+   every tick" issue from two sessions ago. It isolates the misread tick
+   from the correctly-read `012` samples right next to it, so the
+   reversion guard's lookback has nothing valid nearby to catch it
+   against.
+
+Bug B's known fix (template curation) was already tried once this
+project with diminishing returns, and this instance (arbitrary game
+background, not a fixed HUD neighbor) has no fixed midpoint to clamp
+against like the earlier neighbor-bleed fix did. **Treated as a rare
+residual case, not worth chasing right now** -- still present in this
+session's final video 1 clip list (`t=62.2`, low confidence 0.465).
+The timer-noise session-fragmentation piece is a separate, purely
+timer-based issue and might be the better-leveraged fix if revisited,
+since it's unrelated to any digit template quality.
+
+**Bug A fixed.** Root cause confirmed exactly as diagnosed two sessions
+ago (id=8, t=193.0): the timer jumps in a single frame but the combo
+counter's roll/pop animation takes ~350ms (up to ~2s for a fast
+multi-kill chain, see t=122.0) to settle, so the sample pair
+`detect_kill_groups` picks based on where *combo* stabilizes often
+isn't the same pair where the *timer's own jump* landed -- making a
+real bonus kill's timer delta read as ~0.
+
+Fix: `event_detector._timer_before`/`_timer_after` search a window
+(`config.TIMER_DELTA_SEARCH_WINDOW_S = 3.0`, sized past the ~2s
+worst-case lag) before `prev` and after `curr` respectively, for the
+timer's true pre-/post-kill value, decay-adjusting every candidate to a
+common reference point (`sample.timer_value_s + (sample.timestamp_s -
+reference_ts)`) so readings from different ticks become directly
+comparable. `_timer_before` takes the minimum decay-adjusted value
+(the reading the jump hasn't reached yet); `_timer_after` takes the
+maximum (the reading that has already caught up). With only prev/curr
+in range this reduces to exactly the old `prev.timer_value_s`/
+`curr.timer_value_s` behavior -- verified algebraically and by the
+full existing test suite passing unmodified. Two new tests reproduce
+the real single-kill (id=8) and multi-kill (t=122.0) lag patterns
+directly with synthetic samples.
+
+**A/B tested against real footage before trusting it (not just unit
+tests) -- this surfaced a second, real bug the design didn't
+anticipate:** stashed the fix, re-ran video 2's full pipeline for a
+clean baseline (7 clips), restored the fix, re-ran again (4 clips) --
+diffing found 2 clips correctly improved (`bullet_kill` -> `mixed`,
+now correctly attributing some bonus kills) but **3 clips vanished
+entirely.** Traced all three to the same cause: the timer-delta window
+has no plausibility cap of its own (unlike combo's
+`MAX_PLAUSIBLE_COMBO_VALUE`), so a wild misread elsewhere in the window
+(e.g. `5227.0` or `257.0` next to a cluster of legitimate ~500s
+readings, from the same kind of extreme timer noise the "second,
+distinct bug" investigation flagged two sessions ago) could win the
+min/max and produce an implausible delta that then fails
+`auto_labeler`'s tolerance check -- fails safe (drops the clip) rather
+than mislabeling, but real, unintended data loss.
+
+**Fixed:** bound window candidates by
+`_MAX_PLAUSIBLE_TIMER_SWING_S = config.MAX_PLAUSIBLE_GROUP_SIZE * 5 +
+config.TIMER_DELTA_SEARCH_WINDOW_S` (the largest bonus any real group
+could plausibly contribute, plus decay slack for the window itself) --
+a candidate whose raw timer value is further from `prev`/`curr`'s own
+value than that is excluded before the min/max runs. Uses only an
+already-trusted existing constant, no new domain fact needed. New test
+(`test_detect_kill_groups_ignores_an_implausible_timer_misread_inside_the_search_window`)
+reproduces the exact real pattern (a `257.0` outlier next to a `496.0`/
+`500.0` cluster) directly. Re-ran the video 2 A/B a third time with the
+guard in place: the `t=549.0` clip came back (now `mixed(bonus=2,
+bullet=5)`, previously `mixed(bonus=1, bullet=6)` in the un-windowed
+baseline); two clips (`t=451.8`, `t=575.2`) are still dropped --
+traced `t=451.8` specifically and confirmed the whole surrounding
+window is chaotic enough (timer bouncing across a ~150s range within a
+few ticks, session id incrementing almost every tick) that even
+non-extreme nearby readings are themselves noise the swing bound
+doesn't catch -- judged this the correct, honest outcome (drop an
+unrecoverable read rather than guess) rather than a residual bug,
+consistent with this project's established "safe to skip rather than
+mislabel" pattern everywhere else.
+
+**Verified on all three videos this session** (fresh manifests, all
+fixes -- #6, Bug A, the contamination guard -- in place): video 1 down
+to 4 clips (the t=62.2 phantom/Bug-B case still present as expected,
+untouched by this fix), video 2 at 5 clips, video 3 at 1 clip. **Not
+yet manually re-reviewed** -- clip counts and label composition changed
+substantially enough (video 2: 7 -> 5 clips, several label changes)
+that a fresh manual review pass is the real test of whether this
+actually moved agreement, not just clip counts. See HANDOFF.md.

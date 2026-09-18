@@ -153,3 +153,13 @@ PICKUP_EXCLUSION_WINDOW_S = 5.0
 # entire multi-second overexposed stretch). Real footage showed the
 # revert sample landing up to ~4s after the phantom rise.
 COMBO_REVERSION_CHECK_WINDOW_S = 6.0
+
+# The combo counter's roll/pop animation takes ~350ms for a single kill
+# but up to ~2s for a fast multi-kill chain (real footage: video 2,
+# t=122.0), while the timer jumps in a single frame -- so the sample
+# pair where combo settles into its new value is often not the same
+# pair where the timer's own jump landed. Search this far before the
+# "before" sample and after the "after" sample for the timer's true
+# pre-/post-kill value instead of trusting the combo-based pair
+# directly -- see DECISIONS.md, "Bug A".
+TIMER_DELTA_SEARCH_WINDOW_S = 3.0

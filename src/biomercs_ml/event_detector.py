@@ -17,6 +17,51 @@ def _preceding_combo_value(all_samples: list[HudSample], timestamp_s: float) -> 
     return max(preceding, key=lambda sample: sample.timestamp_s).combo_value
 
 
+def _decay_adjusted_timer(sample: HudSample, reference_ts: float) -> float:
+    # The timer decays 1s per elapsed real second when no bonus lands --
+    # project a sample's reading to what it would read at `reference_ts`
+    # under that same decay, so readings from different ticks become
+    # directly comparable.
+    return sample.timer_value_s + (sample.timestamp_s - reference_ts)
+
+
+# Unlike combo, a raw timer reading has no plausibility cap of its own,
+# so the window search below needs one: a candidate whose raw value is
+# further from the anchor (prev/curr) than any real kill group could
+# plausibly account for is a misread unrelated to this group, not
+# evidence of one -- exclude it rather than let it win the min/max.
+# Bounded by the already-trusted group-size cap (the largest bonus any
+# real group can contribute) plus the window's own normal decay.
+_MAX_PLAUSIBLE_TIMER_SWING_S = config.MAX_PLAUSIBLE_GROUP_SIZE * 5 + config.TIMER_DELTA_SEARCH_WINDOW_S
+
+
+def _timer_before(all_samples: list[HudSample], prev: HudSample, window_s: float) -> float:
+    candidates = [
+        sample
+        for sample in all_samples
+        if prev.timestamp_s - window_s <= sample.timestamp_s <= prev.timestamp_s
+        and sample.timer_value_s is not None
+        and abs(sample.timer_value_s - prev.timer_value_s) <= _MAX_PLAUSIBLE_TIMER_SWING_S
+    ]
+    # A candidate whose own jump already landed within the window reads
+    # *higher* once decay-adjusted than one still from before the jump
+    # -- the minimum is the one the jump hasn't reached yet.
+    return min(_decay_adjusted_timer(sample, prev.timestamp_s) for sample in candidates)
+
+
+def _timer_after(all_samples: list[HudSample], curr: HudSample, window_s: float) -> float:
+    candidates = [
+        sample
+        for sample in all_samples
+        if curr.timestamp_s <= sample.timestamp_s <= curr.timestamp_s + window_s
+        and sample.timer_value_s is not None
+        and abs(sample.timer_value_s - curr.timer_value_s) <= _MAX_PLAUSIBLE_TIMER_SWING_S
+    ]
+    # Symmetric to _timer_before: the maximum is the reading that has
+    # already caught up to the jump, not one still mid-animation.
+    return max(_decay_adjusted_timer(sample, curr.timestamp_s) for sample in candidates)
+
+
 def _reverts_to_pre_rise_value(
     all_samples: list[HudSample], after_timestamp_s: float, pre_rise_value: int
 ) -> bool:
@@ -78,13 +123,21 @@ def detect_kill_groups(
         # to split real kill-bonus time from pickup time here.
         if _pickup_nearby(pickup_search_samples, curr.timestamp_s):
             continue
+        # The combo-based pair above isn't necessarily where the
+        # timer's own jump landed -- its roll/pop animation can lag the
+        # timer's single-frame jump by up to ~2s for a fast multi-kill
+        # chain. Search a window around the pair for the timer's real
+        # pre-/post-kill value instead of trusting prev/curr directly.
+        # See DECISIONS.md, "Bug A".
+        timer_before_s = _timer_before(pickup_search_samples, prev, config.TIMER_DELTA_SEARCH_WINDOW_S)
+        timer_after_s = _timer_after(pickup_search_samples, curr, config.TIMER_DELTA_SEARCH_WINDOW_S)
         groups.append(
             KillGroup(
                 session_id=session_id,
                 timestamp_s=curr.timestamp_s,
                 group_size=group_size,
-                timer_before_s=prev.timer_value_s,
-                timer_after_s=curr.timer_value_s,
+                timer_before_s=timer_before_s,
+                timer_after_s=timer_after_s,
                 elapsed_s=curr.timestamp_s - prev.timestamp_s,
                 confidence=min(prev.confidence, curr.confidence)
                 * config.GROUP_SIZE_CONFIDENCE_FACTOR[group_size],

@@ -2,12 +2,82 @@
 
 Paste this whole file as your first message in a new session to continue.
 
+## Status as of 2026-09-18 (accuracy, resumed) — Bug A fixed (plus a
+## contamination guard the A/B testing found along the way); the
+## phantom-event pattern is root-caused (folds into Bug B, not a new
+## bug, left unfixed); **manual review is the next step, not yet done**
+## (read this first -- supersedes everything below, including the
+## "#6 is DONE" section right under this one; they're historical
+## context now, not the current next step)
+
+**Bug A is fixed** -- see `docs/superpowers/DECISIONS.md`, entry
+"Phantom-event pattern root-caused... Bug A fixed via a timer-delta
+search window" for full technical detail. Short version:
+`event_detector.detect_kill_groups` now searches a window
+(`config.TIMER_DELTA_SEARCH_WINDOW_S = 3.0`) around each detected
+combo-rise for the timer's *own* jump, instead of trusting the
+timer values of the exact two samples the combo-rise landed on --
+fixes the case where the combo counter's ~350ms-2s roll animation lags
+the timer's single-frame jump enough that they land on different
+sample ticks. 3 new tests in `test_event_detector.py`, all passing
+(**94 tests total**).
+
+**Real-footage A/B testing (stash the fix, run video 2, restore, run
+again, diff) is what caught a second bug the design didn't
+anticipate:** the timer-delta window has no plausibility cap of its
+own (unlike combo), so a wild misread elsewhere in the window (e.g.
+`5227.0` next to a cluster of legitimate `~500s` readings) could win
+the min/max search and tank 3 real clips that should have stayed.
+Fixed with a swing bound derived from the already-trusted
+`MAX_PLAUSIBLE_GROUP_SIZE` constant (no new domain fact needed) --
+see DECISIONS.md for the exact formula and the real-footage
+verification. **Don't skip the real-footage A/B step for logic changes
+here again** -- unit tests alone would have shipped the contamination
+bug; it only showed up against real noisy timer data.
+
+**The "new phantom-event pattern" flagged two sessions ago is
+root-caused, not fixed** (video 1, id=1, t=62.2): ground truth combo
+never moves from `012` in that whole window -- it's not a new
+mechanism, it's Bug B (a busy background -- here a static rock wall
+texture, not motion blur -- bleeding into the digit search margin)
+compounded by the still-unfixed timer-noise session-fragmentation
+issue from an earlier session. **Deliberately left unfixed this
+session** -- Bug B's known fix (template curation) already hit
+diminishing returns once this project, and this instance has no fixed
+neighbor to clamp against like the earlier neighbor-bleed fix did.
+Still present in this session's final video 1 clips, low confidence
+(0.465). Don't re-chase this without new material (more real-footage
+samples for the affected digit pairs) or a specific reason to revisit
+the session-fragmentation issue instead.
+
+**Regenerated all three videos' manifests this session with every
+current fix in place (#6 parallelization, Bug A, the contamination
+guard):** video 1 -> 4 clips, video 2 -> 5 clips, video 3 -> 1 clip.
+Clip counts and label composition (bullet_kill/mixed/bonus_kill splits)
+changed substantially from prior sessions' numbers -- expected, given
+how much has landed since those were last measured (Bug C, Bug D, the
+combo cap, digit curation, and now Bug A). **Old `id=N`/timestamp
+references from before this session (e.g. "id=8, t=193.0") no longer
+line up with anything -- so much has changed upstream that those exact
+ticks often don't even produce a sample anymore.** Don't try to
+re-locate them; treat every fresh manifest as the current ground truth
+to review against.
+
+**Start here next session: manually review the fresh clips on all
+three videos** (`scripts/review_sample.py`, same as every previous
+review round) -- this is the real test of whether Bug A's fix actually
+moved agreement, not just clip counts. Ephemeral `/tmp` footage/run
+dirs from this session may or may not survive into a new session (see
+"Ephemeral files" below) -- re-download and re-run per that section if
+gone. After review: if `bullet_kill`/`mixed` agreement improved
+meaningfully, that confirms Bug A was the right lever; if not, revisit
+the phantom-event/session-fragmentation thread instead of re-tuning
+Bug A further.
+
 ## Status as of 2026-09-18 (newest) — #6 (parallelize `sample_video`)
-## is DONE and verified; performance track is complete for now, pick
-## the paused accuracy thread back up next (read this first --
-## supersedes everything below, including the "even later" section
-## right under this one; they're historical context now, not the
-## current next step)
+## is DONE and verified; performance track is complete for now
+## (superseded by the section above -- kept for the #6 implementation
+## detail it still has, which the section above didn't repeat)
 
 **#6 is implemented, TDD'd, and verified against real footage --
 see `docs/superpowers/DECISIONS.md`, entry "Parallelized `sample_video`
