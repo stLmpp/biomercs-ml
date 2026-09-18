@@ -1195,3 +1195,119 @@ gap in this round's review (7-kill overcount) and the most likely to
 have a clean, traceable root cause. See HANDOFF.md for the exact
 reproduction recipe and clip ids from this session (all ephemeral,
 `/tmp` won't survive a new session).
+
+## 2026-09-18 (accuracy, resumed yet further) — `group_size`
+## overestimation root-caused and fixed: prev/curr combo anchors are now
+## clamped against their nearest trusted neighbor before computing
+## group_size
+
+**Root-caused by frame-by-frame tracing two of the worst offenders**
+(video 1 `id=3` t=196.2 and `id=4` t=526.2), same methodology as every
+fix in this project. Both traced to `detect_kill_groups` trusting each
+tick's own per-tick majority-voted `combo_value` for `prev`/`curr`
+outright -- two distinct mechanisms corrupt that per-tick vote, neither
+caught by the existing dip/reversion guards (which only catch a *full*
+revert back to at-or-below the pre-rise value; both cases here are
+*partial* corruptions where the anchor's error is smaller than the real
+kill's own magnitude, so the pair still looks like a directionally
+plausible, just inflated, rise):
+
+- **`id=3` (detected group_size=8, true 1):** `prev`'s tick (`t=193.4`)
+  landed squarely inside the combo's roll/pop animation (the same
+  phenomenon already catalogued for Bug A -- transient intermediate
+  digit values before the counter settles). Native 60fps trace: combo
+  reads a solid `47` at `t=192.967`, a ~300ms screen-flash gap
+  (`is_valid_hud_frame` score drops to -0.17), then `40` at **high
+  confidence (0.77-0.93) for 8 of the tick's 11 vote-burst frames**,
+  then `48` for the last 2 -- the animation artifact wins the majority
+  vote outright and becomes `prev`. Real change was `47->48` (1 kill).
+- **`id=4` (detected group_size=5, true 2):** the opposite mechanism --
+  `curr`'s burst (`t=526.2`) was almost entirely unreadable (10 of 11
+  frames returned no reading at all), and the **one lone frame** that
+  cleared the confidence bar (`138`, conf 0.73) won "majority" by
+  default, since `_majority_value` doesn't require any minimum vote
+  count. The next trusted sample shortly after (in a later,
+  spuriously-split session -- same session-fragmentation noise as
+  "bug C") reads `134`.
+
+**Considered and rejected: a minimum-vote-count floor in
+`_majority_value`** (e.g. reject a winning value with <2 votes) --
+would have cleanly fixed `id=4` alone, but simulating it against real
+per-tick vote-count data across all three videos first (before
+implementing, per this project's established practice) found a winning
+value backed by exactly 1 vote is **20-30% of all successful combo
+reads across all three videos** (video1 23.7%, video2 20.9%, video3
+30.1%), not rare at all -- most bursts in this project's chaotic
+footage have only 1-4 readable frames out of 11. A blanket vote-count
+floor would have silently discarded a large fraction of genuinely
+correct reads in exactly the busy/chaotic windows this project already
+struggles to sample densely. Dropped this approach entirely once the
+data came back.
+
+**Chosen fix, structurally mirroring Bug A's timer-window search but
+using combo's own domain constraint (monotonic non-decreasing within a
+session) instead of timer's decay constraint:**
+`event_detector._effective_prev_combo_value` /
+`_effective_curr_combo_value` search a bounded window
+(reusing `config.COMBO_REVERSION_CHECK_WINDOW_S`, since it's the same
+underlying phenomenon as the existing reversion check -- a per-tick
+vote landing on a wrong value that a nearby sample contradicts, just
+correcting the value instead of only using it as a drop/keep signal)
+around `prev`/`curr` for the nearest trusted neighboring sample:
+
+- If a sample shortly *before* `prev` reads *higher* than `prev`'s own
+  raw value, `prev` is impossible on its own terms (combo can't
+  decrease) -- clamp up to that established value.
+- If a sample shortly *after* `curr` reads *lower* than `curr`'s own
+  raw value, `curr` overshot -- clamp down to that value.
+
+`group_size` is now computed from these effective values, not the raw
+per-tick votes. The existing dip-check, reversion-check, pickup-check,
+and timer-window logic are all left untouched, operating on the raw
+`prev`/`curr` samples exactly as before -- this is a new, independent
+layer inserted before them, not a replacement.
+
+TDD'd directly against both real sequences (`test_event_detector.py`,
+`test_detect_kill_groups_clamps_prev_when_it_undershoots_the_
+established_preceding_value` / `..._clamps_curr_when_a_lone_vote_
+overshoots_the_next_trusted_value`). Verified the whole existing test
+suite (96 prior tests) needed zero changes -- every existing scenario
+either doesn't touch the clamp (single, already-correct pairs) or hits
+the *same* drop outcome via an earlier gate now instead of a later one
+(traced by hand for `test_detect_kill_groups_keeps_a_rise_reverted_
+only_after_the_check_window` in particular, since an unbounded
+forward/backward search would have wrongly clamped that test's
+legitimate later-and-unrelated combo break -- confirming the window
+bound, not just the clamp direction, is load-bearing). **98 tests
+total.**
+
+**Verified against real footage with a full stash/restore A/B diff
+across all three videos** (same methodology Bug A's contamination bug
+was caught by -- unit tests alone were not trusted as sufficient):
+- Video 1: both target clips fixed exactly as predicted -- `id=3`
+  (`t=196.2`) `mixed(1,7)` conf 0.062 -> `bonus_kill(1,0)` conf 0.624;
+  `id=4` (`t=526.2`) `mixed(1,4)` conf 0.42 -> `bonus_kill(1,0)` conf
+  0.70. (`id=4`'s reconstructed group_size is 1, not the human-reviewed
+  ground truth of 2 -- the available samples alone don't recover the
+  second kill, which would need the actual clip video to see; still a
+  large, real improvement over the raw 5.)
+- Video 2: **zero clips changed** -- this video's wrong clips are Bug
+  A/B-class digit-pair misreads, not group_size fabrication, so no
+  regression and no false-positive change, as expected.
+- Video 3: **one new clip appeared** (`session=257`, `t=536.5`,
+  `mixed(1,1)`) that wasn't detected before at all. Investigated before
+  trusting it (surprising result, verify don't assume): native
+  frame trace confirmed a real ~4-frame misread dip to `combo=0`
+  (conf 0.87-0.89, so not low-confidence noise either) sandwiched
+  between solid `98`/`99` reads on both sides -- the old code's own
+  `MAX_PLAUSIBLE_GROUP_SIZE` cap was silently dropping this whole
+  stretch as an implausible 99-kill jump (never recovering the real,
+  smaller rise hiding behind the misread), which this fix now
+  recovers as a real `group_size=2` instead of losing it entirely. No
+  clips disappeared in the diff on any video (no new data loss).
+
+**Not done, deliberately out of scope for this fix:** a full manual
+review pass of the fresh clips across all three videos -- that's the
+real test of whether this closes the accuracy gap the way Bug A's fix
+was meant to, and needs the user actually watching clips, not something
+to attempt unattended. See HANDOFF.md.

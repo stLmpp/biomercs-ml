@@ -2,14 +2,71 @@
 
 Paste this whole file as your first message in a new session to continue.
 
+## Status as of 2026-09-18 (accuracy, resumed yet further) —
+## `group_size` overestimation root-caused and fixed (prev/curr combo
+## anchors now clamped against their nearest trusted neighbor); verified
+## on real footage via a full A/B diff across all three videos. **Start
+## here next session: a full manual review pass of the fresh clips on
+## all three videos** (read this first -- supersedes everything below)
+
+**Root cause and fix:** see `docs/superpowers/DECISIONS.md`, entry
+"`group_size` overestimation root-caused and fixed" for full detail.
+Short version: `event_detector.detect_kill_groups` was trusting each
+tick's own raw per-tick majority-voted `combo_value` for `prev`/`curr`
+outright. Two distinct mechanisms could corrupt that single-tick vote
+(neither caught by the existing dip/reversion guards, since both are
+*partial* corruptions smaller than the real kill's own magnitude):
+a combo roll/pop animation transiently rendering a low intermediate
+value that wins a strong majority (video 1 `id=3`, detected group_size
+8, true 1), and a near-unreadable burst where one lone corroboration-free
+frame wins "majority" by default (video 1 `id=4`, detected group_size
+5). **Considered and rejected a minimum-vote-count floor in
+`_majority_value`** after simulating it against real vote-count data
+first -- a winning value backed by exactly 1 vote turned out to be
+20-30% of all successful combo reads across all three videos, so a
+blanket floor would have discarded a large fraction of genuinely
+correct reads. Chose instead: `_effective_prev_combo_value`/
+`_effective_curr_combo_value` clamp `prev`/`curr` against the nearest
+trusted neighboring sample within a bounded window
+(`config.COMBO_REVERSION_CHECK_WINDOW_S`, reused) before computing
+`group_size`, using combo's own monotonic-non-decreasing domain
+constraint -- structurally the same idea as Bug A's timer-window
+search, just for combo instead of timer. TDD'd against both real
+sequences, **98 tests total**, zero changes needed to the 96 prior
+tests.
+
+**Verified via a full stash/restore A/B diff across all three videos**
+(not just unit tests -- same methodology Bug A's contamination bug was
+caught by): video 1's two target clips both fixed as predicted
+(`mixed(1,7)`->`bonus_kill(1,0)` and `mixed(1,4)`->`bonus_kill(1,0)`);
+video 2 had **zero clips changed** (its wrong clips are a different bug
+class, unaffected as expected, no regression); video 3 gained **one
+new clip** (`session=257`, `t=536.5`, group_size 2) that the old
+`MAX_PLAUSIBLE_GROUP_SIZE` cap was silently dropping entirely as an
+implausible 99-kill jump -- investigated and confirmed real (a genuine
+~4-frame misread dip to `combo=0` sandwiched between solid `98`/`99`
+reads, not a fluke). No clips disappeared on any video (no new data
+loss).
+
+**Start here next session: a full manual review pass of the fresh
+clips on all three videos** (`scripts/review_sample.py`) -- this is the
+real test of whether the fix actually moved agreement, the same
+"regenerate manifests, review from scratch, look at the aggregate rate"
+pattern used after every other fix in this project. Ephemeral `/tmp`
+footage/run dirs from this session may not survive into a new session
+(see "Ephemeral files" below) -- re-download and re-run per that
+section if gone. If `bullet_kill`/`mixed` agreement improved
+meaningfully, that confirms this was the right lever; if not, the
+`bonus_kill` count vs. the Wesker dash-finisher-meta expectation is
+still the strongest signal to re-check next (see the "3/10 correct"
+section below for the baseline this is measured against).
+
 ## Status as of 2026-09-18 (accuracy, resumed even further) — manual
 ## review done: 3/10 correct, found `group_size` overestimation is the
 ## real dominant bug (not anything Bug A touches); confidence discount
-## also split by bonus/bullet count. **Start here next session: root-cause
-## `group_size` overestimation on video 1 `id=3` (t=196.2, detected 8,
-## true 1)** (read this first -- supersedes everything below, including
-## the "Bug A fixed" section right under this one; they're historical
-## context now, not the current next step)
+## also split by bonus/bullet count. (superseded by the section above --
+## kept for the review-baseline detail and per-clip table it still has,
+## which the section above didn't repeat)
 
 **Manually reviewed all 10 clips across all three videos** with Bug A
 and its contamination guard in place -- **3/10 correct (30%)**. Not a

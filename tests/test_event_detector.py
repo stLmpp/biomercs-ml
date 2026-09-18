@@ -280,6 +280,52 @@ def test_detect_kill_groups_finds_the_real_timer_jump_across_a_multi_tick_animat
     assert group.timer_after_s == 309.6
 
 
+def test_detect_kill_groups_clamps_prev_when_it_undershoots_the_established_preceding_value():
+    # Real footage (video 1, id=3, t=196.2): the combo's roll/pop
+    # animation (the same phenomenon documented for Bug A) transiently
+    # rendered "040" for 8 of an 11-frame vote burst, landing exactly on
+    # `prev`. The true preceding value (47, read cleanly one tick
+    # earlier) is higher than this animation artifact, and the combo
+    # counter can never decrease during a session -- so `prev`'s own raw
+    # reading is impossible on its own terms and should be clamped up to
+    # the established value before computing group_size, instead of
+    # trusting it outright (which reported a fabricated group_size=8;
+    # 47->48 is a real group_size=1).
+    session = [
+        _sample(0.0, 284.0, 47, session_id=120),
+        _sample(0.4, 284.0, 47, session_id=120),
+        _sample(1.0, 288.0, 40, session_id=120),  # animation artifact, not a real dip
+        _sample(3.8, 286.0, 48, session_id=120),
+    ]
+    groups = event_detector.detect_kill_groups(session, session_id=120)
+    assert len(groups) == 1
+    assert groups[0].group_size == 1
+
+
+def test_detect_kill_groups_clamps_curr_when_a_lone_vote_overshoots_the_next_trusted_value():
+    # Real footage (video 1, id=4, t=526.2): `curr`'s per-tick vote was
+    # won by a single frame out of an otherwise-unreadable burst (10 of
+    # 11 frames returned no reading at all) -- a fluke with zero
+    # corroboration. The next trusted sample (in a later, spuriously
+    # split session -- a nearby timer misread fragmented the session
+    # boundary, same class of noise as "bug C") reads lower than this
+    # fluke but still higher than the pre-rise value, confirming curr
+    # overshot. The combo counter can never exceed a later confirmed
+    # value, so curr should be clamped down before computing group_size
+    # (raw detected group_size=5; the data available here reconstructs
+    # to 1 -- the actual clip's human-reviewed ground truth is 2, which
+    # would need the video itself to fully recover, but this is still a
+    # real, evidenced improvement over the raw 5).
+    session = [_sample(0.0, 521.0, 133, session_id=360), _sample(0.2, 521.0, 138, session_id=360)]
+    later_session = [_sample(2.2, 524.0, 134, session_id=361)]
+    all_samples = session + later_session
+
+    groups = event_detector.detect_kill_groups(session, session_id=360, all_samples=all_samples)
+
+    assert len(groups) == 1
+    assert groups[0].group_size == 1
+
+
 def test_detect_kill_groups_ignores_an_implausible_timer_misread_inside_the_search_window():
     # Real footage (video 2, ~t=549.0s): the timer-delta search window
     # can contain an unrelated garbage misread (e.g. a wrong minutes

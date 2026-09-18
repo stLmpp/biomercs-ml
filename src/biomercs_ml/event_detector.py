@@ -17,6 +17,41 @@ def _preceding_combo_value(all_samples: list[HudSample], timestamp_s: float) -> 
     return max(preceding, key=lambda sample: sample.timestamp_s).combo_value
 
 
+def _effective_prev_combo_value(all_samples: list[HudSample], prev: HudSample, window_s: float) -> int:
+    # The combo's roll/pop animation (see "Bug A") can transiently render
+    # an intermediate value low enough to win a tick's own majority vote,
+    # landing directly on `prev`. Since the combo counter never decreases
+    # during a session, a nearby (within `window_s`) earlier sample
+    # reading higher than `prev` proves `prev` undershot -- clamp up to
+    # that established value instead of trusting `prev` outright.
+    candidates = [
+        sample
+        for sample in all_samples
+        if prev.timestamp_s - window_s <= sample.timestamp_s < prev.timestamp_s
+    ]
+    if not candidates:
+        return prev.combo_value
+    nearest = max(candidates, key=lambda sample: sample.timestamp_s)
+    return max(prev.combo_value, nearest.combo_value)
+
+
+def _effective_curr_combo_value(all_samples: list[HudSample], curr: HudSample, window_s: float) -> int:
+    # Symmetric to _effective_prev_combo_value: a tick's own vote can be
+    # won by a single lone-frame fluke with zero corroboration when the
+    # rest of its burst is unreadable, landing directly on `curr`. A
+    # nearby (within `window_s`) later sample reading lower than `curr`
+    # proves `curr` overshot -- clamp down to that value instead.
+    candidates = [
+        sample
+        for sample in all_samples
+        if curr.timestamp_s < sample.timestamp_s <= curr.timestamp_s + window_s
+    ]
+    if not candidates:
+        return curr.combo_value
+    nearest = min(candidates, key=lambda sample: sample.timestamp_s)
+    return min(curr.combo_value, nearest.combo_value)
+
+
 def _decay_adjusted_timer(sample: HudSample, reference_ts: float) -> float:
     # The timer decays 1s per elapsed real second when no bonus lands --
     # project a sample's reading to what it would read at `reference_ts`
@@ -88,7 +123,17 @@ def detect_kill_groups(
     for i in range(len(session_samples) - 1):
         prev = session_samples[i]
         curr = session_samples[i + 1]
-        group_size = curr.combo_value - prev.combo_value
+        # Compute group_size from each anchor's *effective* combo value,
+        # not its raw per-tick vote -- see _effective_prev_combo_value /
+        # _effective_curr_combo_value for why a raw vote can under- or
+        # overshoot the truth even after per-tick majority voting.
+        effective_prev_combo = _effective_prev_combo_value(
+            pickup_search_samples, prev, config.COMBO_REVERSION_CHECK_WINDOW_S
+        )
+        effective_curr_combo = _effective_curr_combo_value(
+            pickup_search_samples, curr, config.COMBO_REVERSION_CHECK_WINDOW_S
+        )
+        group_size = effective_curr_combo - effective_prev_combo
         if not (0 < group_size <= config.MAX_PLAUSIBLE_GROUP_SIZE):
             continue
         # A transient misread dip in `prev` (hud_reader's per-tick vote

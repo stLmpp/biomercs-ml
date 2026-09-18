@@ -168,6 +168,14 @@ PICKUP_EXCLUSION_WINDOW_S = 5.0
 # cause" (combo tens-digit misread surviving majority vote across an
 # entire multi-second overexposed stretch). Real footage showed the
 # revert sample landing up to ~4s after the phantom rise.
+#
+# Also reused as the search window for clamping a kill-group's prev/curr
+# combo anchors against their nearest trusted neighbor before computing
+# group_size (see event_detector._effective_prev_combo_value /
+# _effective_curr_combo_value) -- same underlying phenomenon (a
+# per-tick vote landing on a wrong value that a nearby sample
+# contradicts), just correcting the value instead of only using it as a
+# drop/keep signal.
 COMBO_REVERSION_CHECK_WINDOW_S = 6.0
 
 # The combo counter's roll/pop animation takes ~350ms for a single kill
