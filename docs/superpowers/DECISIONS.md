@@ -1360,3 +1360,100 @@ this session (video3 `id=2`, t=557.8) was hand-corrected directly in
 the manifest (`review_correct=1`, true fields cleared) since it
 predates this fix and the interactive session that produced it had
 already ended.
+
+## 2026-09-18 (a fourth video, cross-validation) — new root cause found:
+## calibration's scan budget can be entirely consumed by a pre-gameplay
+## stretch, locking in the wrong offset for the whole video; fixed by
+## starting the scan from the video's midpoint
+
+**A fourth video was added this session**
+(`https://www.youtube.com/watch?v=zIMN3UNyo2s`, format 298, same
+1280x720@60fps) specifically for cross-validation, per the user's own
+call after the group_size fix's review results showed too little data
+(11 clips total across 3 videos) to tell whether the remaining gaps
+were systematic or one-off. First pipeline run: 8 clips, 6
+`bonus_kill`/2 `mixed`, no `bullet_kill` at all (matches the Wesker
+meta). User reviewed all 8: **4/8 correct (50%)** -- better than the
+prior 27.3%, but **every single wrong clip was an overcount**, and
+every true correction again had `n_bullet=0` -- the same
+group_size-overestimation signature, on fresh footage, that the
+group_size fix (previous entry) was supposed to already address.
+
+**Root-caused the worst offender** (`id=7`, t=606.4, detected
+group_size 6, true 1) with the same frame-by-frame methodology as
+every fix in this project -- and it turned out to be a **completely
+different bug**, not a gap in the group_size clamp fix. The clamp fix
+only helps when a *nearby* trusted sample can correct a corrupted
+anchor; here, `prev` (combo=125, t=585.8) and `curr` (combo=131,
+t=606.4) are both individually solid, confidently-read, genuinely
+correct samples -- the problem is a **20.6-second gap with zero valid
+samples in between them**, so however many separate real kills
+happened across that gap get treated as one simultaneous group by
+`detect_kill_groups`'s core adjacent-pair assumption. The same
+signature explained `id=3` (24.7s gap) and `id=4` (16s gap) too.
+
+**Traced the gap itself** (`find_best_offset` run directly against the
+"invalid" frames inside it) and found the *true* offset there is
+`(7, 0)` at **0.98-0.99 confidence** -- a near-perfect match -- while
+`sample_video`'s own calibration had locked in `(0, 0)` for the whole
+video, which only scores ~0.46-0.48 on these frames (just under the
+0.6 validity threshold). **Root cause:** `_calibrate_offset` scans
+candidates sequentially from frame 0 and gives up after
+`config.CALIBRATION_MAX_FRAMES` (600) candidates -- spaced by the 0.2s
+tick interval, that's **~120 seconds of video**. This video's actual
+gameplay doesn't start until `t=146.9s`: the pre-gameplay stretch runs
+past the entire scan budget, so calibration never sees a single real
+gameplay frame before falling back to the wrong `(0, 0)`. This single
+wrong offset explains not just `id=3/4/7`'s overcounts but the video's
+overall sparse sampling: only **36 total valid samples across 670s**
+(videos 1-3 had 2000+ each), since `is_valid_hud_frame` fails almost
+everywhere at the wrong offset.
+
+**User's own domain knowledge shaped the fix:** many real runs have a
+"preparation lap" collecting time-bonus pickups before the first kill
+-- a pre-gameplay stretch isn't just loading screens/menus, it's a
+normal, common part of run structure, so raising
+`CALIBRATION_MAX_FRAMES` further would only push the same failure mode
+to a longer prep lap, not eliminate the class of bug. **User proposed
+starting the calibration scan from the video's midpoint instead**
+(rather than my own first idea, evenly spreading candidates across the
+whole duration) -- simpler, and directly targeted at the actual domain
+pattern: by a run's midpoint, real combat is almost certainly
+happening, regardless of how long the prep lap or intro was.
+
+**Implemented as a one-line change at the call site, not inside
+`_calibrate_offset` itself:** `_calibrate_offset` already just scans
+forward from wherever its `cap` argument is currently positioned, so
+`sample_video` now does `cap.set(cv2.CAP_PROP_POS_FRAMES, total_frames
+// 2)` immediately before calling it -- `_calibrate_offset`'s own
+internal voting logic (and its existing test suite) needed zero
+changes. TDD'd via `test_sample_video_starts_calibration_from_the_
+middle_of_the_video`, which patches `_calibrate_offset` to record the
+real `cap`'s position at call time (using the real fixture video's own
+frame count as ground truth) rather than constructing a bespoke
+two-offset video fixture. **102 tests total.**
+
+**Verified against real footage with a full stash/restore A/B diff
+across all four videos** (this change touches every video's
+calibration, not just video4's, so all four needed re-checking, not
+just the one that surfaced the bug): video4 went from 36 to **327
+total samples (9x)**, and its clip count changed from 8 to 6 clips (all
+in a different part of the video -- the previously-fabricated `id=7`
+group at t=606.4 is gone entirely, replaced by whatever the much denser
+real sampling actually supports there). **Videos 1-3 produced
+byte-identical clip lists before and after** -- their calibration was
+already converging correctly within the old frame-0 scan budget, so
+starting from the midpoint instead just finds the same correct offset
+by a different path. Confirms the fix is surgical: it only changes
+behavior for the specific failure case (intro/prep-lap longer than the
+scan budget), zero effect otherwise.
+
+**Not yet done:** manual review of video4's fresh 6-clip set (post
+calibration fix) -- the previous review round's data is now stale
+since the clip set itself changed substantially. There's also a
+known, separate, already-documented issue visible in video4's denser
+sample stream (rapid session-id churn from timer noise in chaotic
+stretches, e.g. session ids 401/406/408/409 within a 30s window) --
+this is the pre-existing "timer-noise session-fragmentation" thread
+flagged (but never fixed) in earlier sessions, not something this fix
+touches or caused.

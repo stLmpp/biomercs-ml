@@ -109,6 +109,50 @@ def test_sample_video_applies_calibrated_offset_only_to_validity_check():
     assert all(_received_fake_offset(call) for call in mock_popup_visible.call_args_list)
 
 
+def test_sample_video_starts_calibration_from_the_middle_of_the_video():
+    # Real footage (video 4, t=585.8-606.4): a long pre-gameplay stretch
+    # -- loading/menus, or, per the game's own run structure, a
+    # "preparation lap" collecting time bonuses before the first kill --
+    # can run past calibration's whole scan budget (config.
+    # CALIBRATION_MAX_FRAMES candidates, spaced by frame_interval) if it
+    # starts from frame 0, locking in the wrong (0, 0) fallback offset
+    # for the entire rest of the video: is_valid_hud_frame then scores
+    # just under threshold almost everywhere, starving sample_video of
+    # ticks and letting detect_kill_groups lump many real, separate
+    # kills spread across the resulting gaps into one fabricated group.
+    # Starting from the middle sidesteps this -- by a run's midpoint,
+    # real gameplay HUD is almost certainly on screen, regardless of how
+    # long the pre-gameplay stretch was.
+    timer_templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
+    combo_templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+    combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
+    popup_digit_templates = hud_reader.load_digit_templates(config.POPUP_DIGITS_DIR)
+    popup_label_template = hud_reader.load_image(config.POPUP_LABEL_TEMPLATE_PATH)
+
+    seek_positions = []
+
+    def _fake_calibrate(cap, *args, **kwargs):
+        seek_positions.append(cap.get(cv2.CAP_PROP_POS_FRAMES))
+        return (0, 0)
+
+    with patch("biomercs_ml.hud_reader._calibrate_offset", side_effect=_fake_calibrate):
+        hud_reader.sample_video(
+            Path(VIDEO_PATH),
+            timer_templates,
+            combo_templates,
+            combo_label_template,
+            popup_digit_templates,
+            popup_label_template,
+            max_workers=1,
+        )
+
+    reference_cap = cv2.VideoCapture(VIDEO_PATH)
+    total_frames = int(reference_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    reference_cap.release()
+
+    assert seek_positions == [total_frames // 2]
+
+
 def test_sample_video_majority_votes_combo_within_each_tick():
     # A transient single-frame digit misread (e.g. compression noise
     # flipping "8"->"0" for one frame) landing exactly on the 0.2s

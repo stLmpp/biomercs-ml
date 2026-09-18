@@ -357,6 +357,14 @@ def sample_video(
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration_s = total_frames / fps if fps and total_frames else 0.0
 
+    # A long pre-gameplay stretch (loading/menus, or a "preparation lap"
+    # collecting time bonuses before the first kill -- a common real run
+    # structure) can run past calibration's whole scan budget if it
+    # starts from frame 0, locking in the wrong fallback offset for the
+    # entire rest of the video. Starting from the middle sidesteps this:
+    # by a run's midpoint, real gameplay HUD is almost certainly on
+    # screen, regardless of how long the pre-gameplay stretch was.
+    cap.set(cv2.CAP_PROP_POS_FRAMES, total_frames // 2)
     offset = _calibrate_offset(cap, combo_label_template, frame_interval)
     cap.release()
 
