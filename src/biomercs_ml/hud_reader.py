@@ -15,32 +15,37 @@ def load_image(path: str) -> np.ndarray:
     return img
 
 
-def load_digit_templates(dir_path: str) -> dict[str, np.ndarray]:
+def load_digit_templates(dir_path: str) -> dict[str, list[np.ndarray]]:
     templates = {}
-    for path in Path(dir_path).glob("*.png"):
-        templates[path.stem] = load_image(str(path))
+    for digit_dir in Path(dir_path).iterdir():
+        if not digit_dir.is_dir():
+            continue
+        templates[digit_dir.name] = [load_image(str(path)) for path in sorted(digit_dir.glob("*.png"))]
     return templates
 
 
 def match_digit(
     crop: np.ndarray,
-    templates: dict[str, np.ndarray],
+    templates: dict[str, list[np.ndarray]],
     target_size: tuple[int, int] | None = None,
 ) -> tuple[str, float]:
     target_w, target_h = target_size if target_size is not None else (crop.shape[1], crop.shape[0])
     best_digit = "?"
     best_score = -1.0
-    for digit, template in templates.items():
-        resized = cv2.resize(template, (target_w, target_h))
-        # .max() rather than [0, 0]: when crop is padded larger than the
-        # resized template (read_digit_slots' search margin), this finds
-        # the best-aligned position within it; when crop is exactly
-        # target-sized, the result is 1x1 and this is equivalent to [0, 0].
-        result = cv2.matchTemplate(crop, resized, cv2.TM_CCOEFF_NORMED)
-        score = float(result.max())
-        if score > best_score:
-            best_score = score
-            best_digit = digit
+    for digit, samples in templates.items():
+        for template in samples:
+            resized = cv2.resize(template, (target_w, target_h))
+            # .max() rather than [0, 0]: when crop is padded larger than the
+            # resized template (read_digit_slots' search margin), this finds
+            # the best-aligned position within it; when crop is exactly
+            # target-sized, the result is 1x1 and this is equivalent to [0, 0].
+            result = cv2.matchTemplate(crop, resized, cv2.TM_CCOEFF_NORMED)
+            score = float(result.max())
+            # A digit only needs to win with any one of its own samples
+            # -- see "fifth root cause" in DECISIONS.md.
+            if score > best_score:
+                best_score = score
+                best_digit = digit
     return best_digit, best_score
 
 

@@ -16,6 +16,45 @@ def test_load_digit_templates_loads_available_timer_digits():
         assert digit in templates
 
 
+def test_load_digit_templates_loads_every_sample_in_a_digits_subdirectory(tmp_path):
+    # Templates live one subdirectory per digit (not one flat file per
+    # digit) so a digit can have several sample images -- best score
+    # across a digit's own samples wins, fixing digits whose single
+    # template happened to be a bad match against real footage. See
+    # docs/superpowers/DECISIONS.md, "fifth root cause".
+    digit_0_dir = tmp_path / "0"
+    digit_0_dir.mkdir()
+    cv2.imwrite(str(digit_0_dir / "a.png"), np.zeros((10, 10, 3), dtype=np.uint8))
+    cv2.imwrite(str(digit_0_dir / "b.png"), np.zeros((10, 10, 3), dtype=np.uint8))
+    digit_1_dir = tmp_path / "1"
+    digit_1_dir.mkdir()
+    cv2.imwrite(str(digit_1_dir / "a.png"), np.zeros((10, 10, 3), dtype=np.uint8))
+
+    templates = hud_reader.load_digit_templates(str(tmp_path))
+
+    assert len(templates["0"]) == 2
+    assert len(templates["1"]) == 1
+
+
+def test_match_digit_wins_if_any_one_of_its_own_samples_matches_well():
+    # A digit should only need to win with *any one* of its samples, not
+    # all of them -- this is the actual fix for the fifth-root-cause
+    # bug, where a digit's one and only template happened to be a bad
+    # match against real footage while a competing digit's template
+    # matched better.
+    crop = np.random.default_rng(0).integers(0, 255, size=(10, 10, 3), dtype=np.uint8)
+    unrelated = np.random.default_rng(1).integers(0, 255, size=(10, 10, 3), dtype=np.uint8)
+    templates = {
+        "0": [unrelated, crop],  # first sample is a bad match, second is a perfect one
+        "1": [unrelated],
+    }
+
+    digit, score = hud_reader.match_digit(crop, templates)
+
+    assert digit == "0"
+    assert score > 0.99
+
+
 def test_match_digit_identifies_correct_digit():
     templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
     frame = _load_frame()
@@ -81,6 +120,7 @@ def test_read_digit_slots_tolerates_small_pixel_misalignment():
 
     assert value == 3
     assert confidence > config.DIGIT_MATCH_MIN_CONFIDENCE
+
 
 
 def test_read_digit_slots_does_not_bleed_into_a_neighboring_slots_ink():
