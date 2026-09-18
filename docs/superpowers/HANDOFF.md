@@ -2,8 +2,105 @@
 
 Paste this whole file as your first message in a new session to continue.
 
-## Status as of 2026-09-17 (read this first, it supersedes the "Open
-## problem" section below for the immediate next step)
+## Status as of 2026-09-18 (read this first -- supersedes everything
+## below, including the 2026-09-17 sections; they're historical context
+## now, not the current next step)
+
+**The fifth root cause (combo digit "0" losing to "8"/"9") is now
+fixed** (multi-sample template architecture implemented, real
+video-sourced samples curated for combo 0/3/5/7 -- commit `85186fa`),
+**plus three new `event_detector` safeguards** (group-size ceiling
+20->8, a combo-reversion check, rarity-scaled confidence -- commit
+`dbf7231`). One specific frame (video 2, t=408.8s) remains an accepted,
+permanent pixel-level limit -- it's genuinely overexposed, not just
+compressed, so no digit reader can recover it; this is caught downstream
+by the safeguards instead. Full technical writeup for both:
+`docs/superpowers/DECISIONS.md`, entries "Multi-sample architecture
+implemented..." and "event_detector domain-knowledge safeguards...".
+
+**Result: video 2 went from 46 clips to 17 (the four original phantom
+`n_bullet=10` groups are gone), video 1 went from 40 to 17.**
+`bonus_kill` is now the dominant label on both, matching the Wesker
+dash-finisher meta.
+
+**But manually re-reviewing video 2's new 17 clips found a second,
+separate bug, not yet root-caused -- this is the actual next step, not
+the (now fixed) combo-0-vs-8/9 issue:**
+
+- Agreement is only 52.9% (9/17): `bonus_kill` 9/9 correct, `bullet_kill`
+  0/4 correct, `mixed` 1/4 correct -- almost the exact same broken
+  pattern the *previous* session found before any of today's fixes.
+- The review script now captures corrections (type `<bonus>/<bullet>`
+  e.g. `1/2` instead of just `n` when a label is wrong -- see
+  `review.parse_review_answer`; re-review only previously-wrong clips
+  with `uv run python scripts/review_sample.py <db> wrong`). Using it on
+  all 8 wrong video-2 clips found **every single one had a true
+  `n_bullet` of 0** -- they were all pure `bonus_kill` events. Full
+  table (detected vs. actual bonus/bullet counts, per clip id and
+  timestamp) is in the DECISIONS.md entry "Re-review surfaces a second,
+  distinct bug".
+- Traced raw per-tick `HudSample`s around all 8 events and found the
+  likely cause is **not** a labeling-math bug (`auto_labeler`'s
+  `n_bonus = round(bonus_seconds / 5.0)` math is correct per
+  `docs/knowledge_base/mercenaries-mechanics.md` -- each bonus kill adds
+  a full independent +5s). Instead:
+  - **Timer readings are badly unstable in these specific windows** --
+    e.g. one tick reads `timer=2660.0`, another `timer=2889.0` (garbage
+    four-digit values, not just a wrong-but-plausible digit).
+  - **`session_id` increments on nearly every tick** in these windows
+    (e.g. 3 different session ids within 2 seconds), because
+    `is_new_session`'s timer-jump detection fires constantly on this
+    noise -- fragmenting what's very likely one continuous fast-kill
+    sequence into many spurious single-tick sessions, which directly
+    breaks `detect_kill_groups` (it only ever compares samples it's
+    told are in the same session).
+  - A likely **new, distinct combo-digit confusion** separate from the
+    now-fixed 0-vs-8/9 case: clip id=1 (t=37.0s) detected combo
+    `884->886` (group_size 2) where the real value was `884->885`
+    (group_size 1) -- consistent with ones-digit "5" misread as "6",
+    not yet investigated.
+  - All 8 events cluster in fast, chaotic combat moments (rapid
+    consecutive kills, likely screen-flash/particle effects) -- the
+    same kind of footage that has produced most of this project's hard
+    bugs so far.
+
+**Start here next session:** pick one of the 8 wrong clips (id=8,
+t=193.0s, is the simplest -- detected `(0,1)` vs actual `(1,0)`, and the
+group_size already matched at 1, so it isolates the timer-read failure
+without also debugging a combo-count discrepancy) and apply the same
+frame-by-frame methodology used for every fix in this project: pull raw
+frames around the event with `cv2.imwrite`, look at the actual pixels,
+don't trust confidence numbers alone. The timer-instability and
+session-fragmentation problem likely needs fixing before or alongside
+whatever's happening with the combo digit, since it may be corrupting
+more than just these 8 flagged clips (video 2 has 17 clips total but
+only these 8 were manually checked in detail this way -- video 1 hasn't
+been re-reviewed with the correction-capable script at all yet).
+
+**Reproduction recipe** (the cached per-tick samples used for this
+session's tracing were in `/tmp/video2_samples.pkl`, gone in a new
+session -- re-download video 2 per "Ephemeral files" below, then):
+```python
+from pathlib import Path
+from biomercs_ml import config, hud_reader
+
+timer_templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
+combo_templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
+popup_digit_templates = hud_reader.load_digit_templates(config.POPUP_DIGITS_DIR)
+popup_label_template = hud_reader.load_image(config.POPUP_LABEL_TEMPLATE_PATH)
+samples = hud_reader.sample_video(
+    Path("/tmp/biomercs-footage2/source.mp4"), timer_templates, combo_templates,
+    combo_label_template, popup_digit_templates, popup_label_template,
+)
+# then filter `samples` for timestamp_s within a couple seconds of each
+# wrong clip's timestamp (37.0, 69.0, 122.0, 181.2, 193.0, 492.4, 522.0,
+# 549.2) and inspect timer_value_s/combo_value/session_id directly.
+```
+Re-running the full pipeline (`pipeline.run(...)`) reproduces the same
+manifest ids/timestamps deterministically, same as always.
+
+## Status as of 2026-09-17 (superseded by the above -- kept for history)
 
 The handoff's "concrete lead" (four `n_bullet=10` groups in video 2) has
 been **root-caused, not yet fixed**. Full writeup with evidence:

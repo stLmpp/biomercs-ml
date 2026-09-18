@@ -383,3 +383,207 @@ necessarily touches all three template sets (`digits_combo`,
 `digits_timer`, `digits_popup`) since they share `load_digit_templates`,
 but only `digits_combo` gets new sample images -- timer/popup's single
 existing templates just move into same-named subdirectories unchanged.
+
+## 2026-09-18 — Multi-sample architecture implemented; the fifth root
+## cause's remaining case is accepted as a pixel-level limit, caught
+## downstream instead
+
+Implemented the architecture from the previous entry
+(`load_digit_templates`/`match_digit` now take `dict[str, list[ndarray]]`,
+directory-per-digit layout, max score across a digit's own samples wins
+-- commit `85186fa`). Curating the actual sample images surfaced a
+second, nested version of the same root cause:
+
+- **First attempt (screenshots as templates) reproduced the original
+  bug, one level deeper.** Cropped 0/3/5/7 samples from the user's
+  native 1920x1080 Steam screenshots (crisp, uncompressed). Tested
+  against the real bug frame (video 2, t=408.8s, "105 COMBO"): every
+  screenshot-sourced sample scored *worse* than the original bad
+  calibration-screenshot template (max ~0.45-0.55 vs. the real "9"
+  confusion's 0.80+). Root cause: `cv2.matchTemplate`'s
+  `TM_CCOEFF_NORMED` compares raw pixel intensities, so a crisp,
+  uncompressed template correlates poorly against a frame that went
+  through YouTube's H.264 compression -- the exact same
+  clean-source-vs-compressed-target mismatch as the original bug, just
+  with a different clean source. **Lesson: template samples must come
+  from the same capture/compression pipeline as what they'll be
+  matched against**, not just "real gameplay" in the abstract.
+- **Fix: re-sourced 0/3/5/7 samples directly from the two
+  already-downloaded YouTube videos** (real early-session combo climbs
+  like "057", "053", "085", "034", "054", "027" naturally show every
+  digit 0-9 at low combo values), keeping one calibration-frame sample
+  (for compatibility with `sample_frame_01.png`-based fixtures/tests)
+  and one Steam-screenshot sample (background diversity) as
+  supplementary, not primary, sources.
+- **The original adversarial frame (t=408.8s) still cannot be read
+  correctly, and this is now an accepted limit, not an open bug.**
+  Investigated three approaches in sequence, all against this exact
+  frame's tens-digit crop (true "0"):
+  1. Raw pixel matching with the new real-video-sourced "0" samples:
+     best score 0.754, still loses to "9"'s 0.816.
+  2. Binarizing both crop and template into black/white ink masks
+     (using the same blue/white color heuristic the screenshot
+     extraction script uses) before matching, to remove
+     compression-blur as a confound: best "0" score 0.624, "9" still
+     wins at 0.686.
+  3. Topology (counting enclosed background regions/holes after tight
+     ink-cropping, since this font's 0 has one full-height hole, 8 has
+     two, 9 has one upper-half hole): unreliable at this resolution --
+     compression noise both falsely closes real holes (the true "0"
+     crop showed *zero* holes) and falsely splits others, making hole
+     count as noisy as raw pixels.
+  Visual inspection explains why: this specific frame is genuinely
+  **overexposed** (bright sun/foliage lighting), and a "0"'s only
+  distinguishing feature -- its dark hollow center -- is blown out to
+  nearly the same brightness as the ring itself. The information needed
+  to tell 0 from 9 was destroyed by lighting at capture time, before
+  any code ever sees the frame. No template, preprocessing, or
+  classifier can recover information that isn't in the source pixels.
+  Confirmed this isn't a one-frame fluke: scanning every native-60fps
+  frame across the full ~18s window this bug spans found the wrong
+  reading dominant by roughly 980-to-44 over the correct one, so even
+  much wider neighbor-frame voting (beyond the existing
+  `SAMPLE_VOTE_FRAMES` burst) would not have rescued it.
+- **Decision: accept the pixel-level loss for this class of frame, and
+  catch its effect at `event_detector` instead** (see next entry). The
+  regression test for this frame moved from asserting `read_combo`
+  returns the correct value (impossible to guarantee) to asserting the
+  resulting bogus kill-group gets discarded downstream regardless of
+  what the digit reader returns for it
+  (`test_detect_kill_groups_drops_a_real_overexposed_frames_misread`).
+
+## 2026-09-18 — event_detector domain-knowledge safeguards (group-size
+## ceiling, reversion check, rarity-scaled confidence)
+
+Three independent checks added to `event_detector.detect_kill_groups`
+(commit `dbf7231`), all from the author's own top-level competitive
+Mercenaries experience, layered on top of (not instead of) the
+digit-matching fix above -- because some misreads (like the overexposed
+frame) genuinely cannot be fixed at the pixel level:
+
+- **`MAX_PLAUSIBLE_GROUP_SIZE`: 20 -> 8.** The old value's reasoning
+  ("the enemy pool is a few hundred, so 100 is impossible") was too
+  loose to be useful -- it let real bugs like `n_bullet=19` and
+  `n_bullet=9` through untouched. Per the user: 8 simultaneous kills is
+  roughly a one-in-a-million event (rare, but has genuinely happened);
+  anything above that is not a plausible real group. Considered keeping
+  a looser cap and relying only on the reversion check below -- rejected
+  because the reversion check requires a later sample to expose the
+  problem, while an implausible size is self-evidently wrong from a
+  single pair of samples alone, no lookahead needed.
+- **Reversion check: a combo rise that reverts to at or below its
+  pre-rise value within `COMBO_REVERSION_CHECK_WINDOW_S` (6.0s) is
+  discarded.** The combo counter only ever increases during a session
+  (a rare genuine reset drops toward zero; it never dips by a small
+  amount and climbs back to exactly its pre-rise value). Real footage
+  (the four original `n_bullet=10` phantom groups) showed exactly this
+  pattern: e.g. `184,184,184,194,184,184` with the timer never
+  changing. This generalizes the existing transient-dip check (which
+  only looks one sample *back*) to also look *forward* -- needed
+  because DECISIONS.md's earlier-rejected "symmetric persistence check"
+  proposal only looked at the immediate next tick, but real footage
+  showed the revert sample landing up to ~4s later, past several
+  intervening ticks. The search scope matches the pickup-search
+  precedent (searches `all_samples`, not just the current session's),
+  since the same chaotic misread stretches that produce this pattern
+  also fragment sessions.
+- **`GROUP_SIZE_CONFIDENCE_FACTOR`: reported group confidence is now
+  multiplied by a per-group-size rarity prior** (1.0 for size 1-3, down
+  to 0.15 at size 8), rather than added as a new hard gate. `KillGroup.
+  confidence` was already purely informational (shown during manual
+  review, never auto-filtered anywhere in the pipeline), so sharpening
+  that existing signal was lower-risk than introducing new filtering
+  logic. Values are the user's own judgment call translating rarity
+  words (ok/possible/rare/very rare/one-in-a-million) into numbers, not
+  derived from data.
+
+**Combined result:** video 2 (the phantom-group video) went from 46
+clips to 17, with the four originally-flagged phantom `n_bullet=10`
+groups completely gone from the timeline. Video 1 went from 40 clips to
+17. `bonus_kill` is now the dominant label on both (11/17 and 9/17
+respectively), consistent with the Wesker dash-finisher meta instead of
+contradicting it.
+
+## 2026-09-18 — Re-review surfaces a second, distinct bug: `n_bullet` is
+## fabricated, not just occasionally miscounted
+
+Manually reviewed all 17 of video 2's post-fix clips (methodology: full
+review, not a sample, since the set is now small enough). Result: only
+**52.9% agreement (9/17)** -- **`bonus_kill` 9/9 correct, `bullet_kill`
+0/4 correct, `mixed` 1/4 correct.** This is nearly the identical
+per-category pattern the previous session found *before* any of this
+session's fixes (`bonus_kill` 15/16, `bullet_kill` 1/9, `mixed` 0/5) --
+today's fixes cut total clip *count* substantially but did not touch
+whatever is actually mislabeling `bullet_kill`/`mixed` events. That bug
+lives elsewhere.
+
+**The review process itself was upgraded first** to capture *what the
+label should have been*, not just whether it was wrong (see
+`review.parse_review_answer`, `dataset_manifest.
+review_true_n_bonus`/`review_true_n_bullet` columns, `fetch_reviewed_
+incorrect`, and `scripts/review_sample.py <db> wrong` to re-review only
+previously-wrong clips). Typing `<bonus>/<bullet>` (e.g. `1/2`) during
+review now records the actual counts the reviewer saw, not just a
+correct/incorrect flag.
+
+Re-reviewing all 8 wrong video-2 clips with this new capability gave a
+striking, uniform result -- **every single one had a true `n_bullet` of
+0.** All eight were pure `bonus_kill` events that the pipeline split
+into a bogus bonus/bullet mix (or pure `bullet_kill`):
+
+```
+id | detected (bonus,bullet) | actual (bonus,bullet) | timestamp
+ 1 | (1,1)                   | (1,0)                  | 37.0
+ 4 | (1,6)                   | (1,0)                  | 69.0
+ 5 | (0,2)                   | (2,0)                  | 122.0
+ 6 | (0,4)                   | (1,0)                  | 181.2
+ 8 | (0,1)                   | (1,0)                  | 193.0
+10 | (0,6)                   | (2,0)                  | 492.4
+11 | (1,4)                   | (1,0)                  | 522.0
+15 | (1,6)                   | (1,0)                  | 549.2
+```
+
+Since `auto_labeler.label_kill_group` computes `n_bullet =
+group.group_size - n_bonus` (a pure remainder, never independently
+verified), a true `n_bullet` of 0 in every case means the bug is
+upstream of labeling, in either (or both) of: `group_size` (the combo
+delta computed by `event_detector`) being inflated beyond the real kill
+count, or `n_bonus` (the timer-delta-derived count) being undercounted
+because the timer read didn't register a real bonus jump. Re-checked
+the mechanics doc (`docs/knowledge_base/mercenaries-mechanics.md`) to
+rule out a scaling-assumption bug first -- confirmed each bonus kill
+really does add a full independent +5s (not diluted across a
+simultaneous group), so `auto_labeler`'s `n_bonus = round(bonus_seconds
+/ 5.0)` math itself is correct; the bad inputs feeding it are the
+problem, not the formula.
+
+**Traced raw per-tick `HudSample`s around all 8 events (video 2) and
+found something more severe than expected, not yet root-caused:**
+- **Timer readings are badly unstable in these specific windows**,
+  independent of the combo bug this session already fixed: e.g. around
+  t=181s one tick reads `timer=2660.0` and another nearby window (t=
+  520s) reads `timer=2889.0` -- four-digit garbage values, not just a
+  wrong digit within a plausible range.
+- **`session_id` increments on nearly every tick** in these windows
+  (e.g. 79->80->81 within 2 seconds at t=179-182s; 237->238->239 within
+  2 seconds at t=490-494s) -- `is_new_session`'s timer-jump/drop
+  detection is firing constantly because the timer readings themselves
+  are too noisy in these stretches, fragmenting what's very likely one
+  continuous fast-kill sequence into many spurious single-tick
+  "sessions." This directly undermines `detect_kill_groups`, which only
+  ever compares *adjacent* samples within what it's told is one
+  session.
+- **A likely new, distinct combo-digit confusion, separate from the
+  0-vs-8/9 case fixed this session:** clip id=1 (t=37.0) detected combo
+  `884 -> 886` (group_size 2) where the real group_size was 1 (884 ->
+  885) -- consistent with a "5" ones-digit misread as "6", not yet
+  investigated the way 0-vs-8/9 was.
+- All 8 events cluster in fast, chaotic combat moments (rapid
+  consecutive kills, likely screen-flash/particle effects), the same
+  kind of footage that has produced the majority of hard bugs this
+  project has found so far (per `test_read_digit_slots_does_not_bleed_
+  into_a_neighboring_slots_ink`'s 149-combo case and others).
+
+**Not yet root-caused.** Deliberately stopped here to log findings
+rather than start a new multi-session investigation immediately -- see
+HANDOFF.md for the reproduction recipe and concrete next steps.
