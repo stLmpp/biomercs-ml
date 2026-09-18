@@ -29,6 +29,17 @@ def test_create_db_then_insert_and_read_back(tmp_path):
     assert rows[0][1] == "clip1.mp4"  # clip_path column
 
 
+def test_create_db_creates_missing_parent_directories(tmp_path):
+    # A local (non-downloaded) video source never triggers
+    # downloader.download, which is the only other place in the
+    # pipeline that happened to create this directory as a side
+    # effect -- create_db must not depend on that.
+    db_path = tmp_path / "nested" / "run" / "manifest.sqlite"
+    dataset_manifest.create_db(db_path)
+
+    assert db_path.exists()
+
+
 def test_fetch_random_sample_respects_limit(tmp_path):
     db_path = tmp_path / "manifest.sqlite"
     dataset_manifest.create_db(db_path)

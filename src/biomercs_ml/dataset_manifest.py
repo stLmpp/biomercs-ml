@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS clips (
 
 
 def create_db(db_path: Path) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(SCHEMA)
