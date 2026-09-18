@@ -2,13 +2,83 @@
 
 Paste this whole file as your first message in a new session to continue.
 
+## Status as of 2026-09-18 (accuracy, resumed even further) — manual
+## review done: 3/10 correct, found `group_size` overestimation is the
+## real dominant bug (not anything Bug A touches); confidence discount
+## also split by bonus/bullet count. **Start here next session: root-cause
+## `group_size` overestimation on video 1 `id=3` (t=196.2, detected 8,
+## true 1)** (read this first -- supersedes everything below, including
+## the "Bug A fixed" section right under this one; they're historical
+## context now, not the current next step)
+
+**Manually reviewed all 10 clips across all three videos** with Bug A
+and its contamination guard in place -- **3/10 correct (30%)**. Not a
+raw-agreement improvement over session-start baseline, but the pattern
+of what's wrong is now very clean and points past Bug A entirely. Full
+per-clip table and reasoning: `docs/superpowers/DECISIONS.md`, entry
+"Manual review of all 10 post-Bug-A clips". Short version:
+
+- **Every true correction found `n_bullet=0`.** All 7 wrong clips this
+  round had zero real bullet kills -- every bullet component detected
+  so far looks fabricated. Matches the user's own read from an earlier
+  session (Wesker's dash-finisher meta should make bullet kills rare).
+- **`group_size` (the raw combo delta) is consistently and drastically
+  overestimated**: detected 8/7/6/5/5/2 vs. true 1/1/1/2/2/2 across the
+  wrong clips. This is upstream of anything Bug A touches (Bug A only
+  fixes *timer-delta attribution* once `group_size` is already right) --
+  it's a combo digit-read problem, same class as Bug B (a confidently
+  wrong digit match), not a new mechanism. **This is now the single
+  biggest lever on accuracy.**
+
+**Also fixed this session: confidence discount split by bonus/bullet
+count**, not raw `group_size` -- `config.BONUS_COUNT_CONFIDENCE_FACTOR`/
+`BULLET_COUNT_CONFIDENCE_FACTOR`, applied in `auto_labeler.label_kill_group`
+(`KillLabel` gained a `confidence` field). **Before implementing, a
+proposed 20%-auto-reject threshold was simulated against the actual
+review data above and found to barely help** (catches only 1 of 7
+wrong clips, since the wrong labels are *confidently* wrong, not
+low-confidence) -- stayed informational-only, no auto-reject added.
+**96 tests total.** Full detail: DECISIONS.md, same entry as above.
+
+**Start here next session: root-cause the `group_size` overestimation**
+-- same frame-by-frame methodology as every fix in this project (pull
+raw frames, look at actual pixels, don't trust confidence numbers
+alone). **Pick video 1's `id=3` first** (`source_120_196.2.mp4` in this
+session's run, `t=196.2`, detected `1 bonus/7 bullet` = group_size 8,
+true `1/0`) -- the biggest single gap in this round's review (7-kill
+overcount), most likely to have a clean, traceable root cause. Other
+candidates from the same review round if that one doesn't pan out
+cleanly: video 1 `id=4` (t=526.2, detected 5, true 2), video 2 `id=2`
+(t=399.2, detected 6, true 1), video 2 `id=4` (t=549.0, detected 7,
+true 1).
+
+**Reproduction (all ephemeral, `/tmp` won't survive a new session --
+see "Ephemeral files" below to re-download/re-run):**
+```
+rm -rf /tmp/biomercs-run /tmp/biomercs-run2 /tmp/biomercs-run3
+uv run python -c "
+from pathlib import Path
+from biomercs_ml import pipeline
+pipeline.run('/tmp/biomercs-footage/source.mp4', Path('/tmp/biomercs-run'), Path('/tmp/biomercs-run/manifest.sqlite'))
+pipeline.run('/tmp/biomercs-footage2/source.mp4', Path('/tmp/biomercs-run2'), Path('/tmp/biomercs-run2/manifest.sqlite'))
+pipeline.run('/tmp/biomercs-footage3/source.mp4', Path('/tmp/biomercs-run3'), Path('/tmp/biomercs-run3/manifest.sqlite'))
+"
+```
+This reproduces the same manifest ids/timestamps deterministically
+(same code + same video). Use `hud_reader._sample_range` directly (see
+`docs/superpowers/DECISIONS.md`, "#6" entry, and this session's own use
+of it while debugging Bug A) to pull raw unfiltered per-tick
+timer/combo/confidence around a specific timestamp without re-running
+the whole pipeline -- much faster than digging through the filtered
+`HudSample` list, and it survives across sub-investigations within one
+session.
+
 ## Status as of 2026-09-18 (accuracy, resumed) — Bug A fixed (plus a
 ## contamination guard the A/B testing found along the way); the
 ## phantom-event pattern is root-caused (folds into Bug B, not a new
-## bug, left unfixed); **manual review is the next step, not yet done**
-## (read this first -- supersedes everything below, including the
-## "#6 is DONE" section right under this one; they're historical
-## context now, not the current next step)
+## bug, left unfixed) (superseded by the section above -- kept for the
+## Bug A implementation detail it still has, which the section above
+## didn't repeat)
 
 **Bug A is fixed** -- see `docs/superpowers/DECISIONS.md`, entry
 "Phantom-event pattern root-caused... Bug A fixed via a timer-delta

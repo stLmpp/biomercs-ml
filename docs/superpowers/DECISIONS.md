@@ -1119,3 +1119,79 @@ yet manually re-reviewed** -- clip counts and label composition changed
 substantially enough (video 2: 7 -> 5 clips, several label changes)
 that a fresh manual review pass is the real test of whether this
 actually moved agreement, not just clip counts. See HANDOFF.md.
+
+## 2026-09-18 (accuracy, resumed further) — Manual review of all 10
+## post-Bug-A clips: 3/10 correct; found the real dominant bug is
+## `group_size` overestimation, not anything Bug A touches. Also split
+## the group-size confidence discount by bonus/bullet count.
+
+**Manually reviewed all 10 clips across all three videos**
+(`scripts/review_sample.py`) with Bug A and the contamination guard in
+place. **3/10 correct (30%)** -- not better than session-start baseline
+in raw agreement, but the *pattern* of what's wrong is now very clean:
+
+- **Every single true correction has `n_bullet=0`.** Not one real
+  bullet kill was found across all 7 wrong clips this round -- matches
+  the user's own read from an earlier session ("too much bullet kills
+  for those scores," Wesker's dash-finisher meta). Every bullet
+  component in every wrong label so far looks fabricated.
+- **`group_size` (the raw combo delta) is consistently and drastically
+  overestimated** on the wrong clips: detected 8/7/6/5/5/2 vs. true
+  1/1/1/2/2/2. The 3 correct clips all had small, clean `group_size`
+  (1-2) with confidence 0.66-0.74. The wrong ones are the large-group,
+  low-confidence-*ish* clips -- see the confidence-split entry below
+  for why "low-confidence-ish" isn't a reliable enough signal by
+  itself.
+- One specific correction worth flagging: `id=2 (t=124.0)`, a 2-bonus-kill
+  group, was manually traced frame-by-frame via screenshots (combo
+  `027->028` visible, but the `+05 sec` popup already showing at the
+  clip's very start suggested a second, earlier `026->027` kill just
+  off-screen) -- the timer-delta math suggested 2 real kills, but the
+  user's own review after actually watching the full clip found it was
+  really only **1**. Worth remembering: frame-by-frame timer/combo
+  math from stills is a good *hypothesis* generator, not a substitute
+  for actually watching the clip play.
+
+Bug A's fix is doing its job where it applies (`t=455.8` and `t=399.2`
+now show *some* bonus attribution instead of pure `bullet_kill`), but
+it can't fix a wrong `group_size` -- that's upstream of anything Bug A
+touches, in the combo digit-read/detection path itself (same class as
+Bug B: a confidently wrong digit match, not a low-confidence one).
+**This is now the single biggest lever on accuracy**, bigger than Bug A
+was.
+
+**Also this session: split the group-size confidence discount by
+bonus/bullet count instead of raw group_size.** User supplied two
+separate rarity tables (own domain knowledge: bullet kills are much
+rarer than bonus kills at the same count in a good run) --
+`config.BONUS_COUNT_CONFIDENCE_FACTOR` / `BULLET_COUNT_CONFIDENCE_FACTOR`
+replace the old single `GROUP_SIZE_CONFIDENCE_FACTOR`. Moved the
+discount from `event_detector.detect_kill_groups` (which only knows
+raw `group_size`) to `auto_labeler.label_kill_group` (the only place
+that knows the bonus/bullet split) -- `KillLabel` gained a `confidence`
+field, `event_detector`'s `KillGroup.confidence` is now just the raw
+undiscounted `min(prev.confidence, curr.confidence)`.
+
+**Before implementing, simulated a proposed 20%-auto-reject threshold
+against this session's actual review data (not hypothetically) --
+good thing, because it barely helps:** only 1 of the 7 wrong clips
+(the most extreme, `1/7` at confidence 0.06) would get caught; the
+other 6 wrong clips score 0.25-0.75, fully overlapping the *correct*
+clips' 0.66-0.75 range. **Stayed informational-only, no auto-reject** --
+the wrong labels aren't low-confidence, they're confidently wrong
+(the same "Bug B: a wrong digit that scores well" pattern), so no
+single global threshold can separate them from the good clips.
+6 new/updated tests across `test_event_detector.py`/`test_auto_labeler.py`,
+**96 tests total**. Re-verified on real footage: same 10 clips/labels
+as before (as designed -- this change only touches reported confidence,
+not detection), confidence numbers now match hand-simulation exactly
+(e.g. the `1/7` clip: 0.09 -> 0.06).
+
+**Start here next session:** root-cause the `group_size` overestimation
+directly, the same frame-by-frame methodology as every fix in this
+project -- pick the worst offender first. Video 1 `id=3` (`t=196.2`,
+detected `1 bonus/7 bullet` = group_size 8, true `1/0`) is the biggest
+gap in this round's review (7-kill overcount) and the most likely to
+have a clean, traceable root cause. See HANDOFF.md for the exact
+reproduction recipe and clip ids from this session (all ephemeral,
+`/tmp` won't survive a new session).
