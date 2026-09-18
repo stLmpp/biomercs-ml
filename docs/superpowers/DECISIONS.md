@@ -1457,3 +1457,55 @@ stretches, e.g. session ids 401/406/408/409 within a 30s window) --
 this is the pre-existing "timer-noise session-fragmentation" thread
 flagged (but never fixed) in earlier sessions, not something this fix
 touches or caused.
+
+## 2026-09-18 (a fourth video, later) — video4's post-calibration-fix
+## clips reviewed: 2/6 correct; two failure modes not seen before,
+## neither root-caused yet
+
+**User reviewed all 6 of video4's fresh clips** (post calibration fix)
+-- **2/6 correct (33.3%)**. Not a clean win over the pre-fix round's
+4/8 (50%), but the clip set changed completely (different timestamps,
+different underlying samples), so it isn't a like-for-like comparison
+-- the calibration fix's own real effect (9x sample density, byte-
+identical output on videos 1-3) is already independently verified, see
+the previous entry.
+
+Per-clip breakdown:
+
+```
+id | detected        | true   | note
+ 1 | bonus_kill(1,0) | --     | correct
+ 6 | bonus_kill(1,0) | --     | correct
+ 2 | bonus_kill(1,0) | (3,0)  | undercount (opposite direction from every prior wrong clip)
+ 3 | mixed(1,6)      | (2,0)  | overcount, group_size 7 vs true 2 -- same family as before
+ 4 | mixed(4,1)      | (2,0)  | overcount, group_size 5 vs true 2 -- same family as before
+ 5 | bonus_kill(1,0) | (0,1)  | wrong kind entirely -- true n_bullet=1
+```
+
+**Two things here are genuinely new, not repeats of an already-fixed
+pattern:**
+- **`id=2` is an undercount** (detected 1, true 3) -- every wrong clip
+  in every previous review round (this session and prior ones) has
+  been an *overcount*. Not yet investigated; a plausible hypothesis
+  (not confirmed) is that the much denser post-calibration-fix sampling
+  now splits a real multi-kill chain across a session boundary, losing
+  part of it -- the timer-noise session-fragmentation issue flagged in
+  the previous entry is a candidate mechanism, but this is speculation
+  until frame-traced.
+- **`id=5` breaks the "every true correction has n_bullet=0" pattern**
+  that has held across every review round in this project so far
+  (first noted 2026-09-18 earlier this session, and in every prior
+  session's review data) -- true here is `(0,1)`, a genuine bullet
+  kill (or a bonus/bullet mislabeling in the *other* direction). None
+  of this session's fixes (group_size clamping, calibration) address
+  this failure mode; it may need its own investigation.
+
+`id=3`/`id=4` still look like the same group_size-overestimation
+family already investigated this session, but worth checking whether
+the calibration fix's much denser sampling has introduced a *new*
+variant of it (not yet checked) rather than assuming it's identical to
+the already-fixed mechanisms.
+
+**Not root-caused, deliberately paused here** -- these are new leads,
+not yet investigated with the frame-by-frame methodology. See
+HANDOFF.md for the concrete next-step options.

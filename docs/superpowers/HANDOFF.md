@@ -2,13 +2,72 @@
 
 Paste this whole file as your first message in a new session to continue.
 
+## Status as of 2026-09-18 (a fourth video, later) — video4's
+## post-calibration-fix clips reviewed: 2/6 correct, with two failure
+## modes never seen before (an undercount, and the first-ever true
+## n_bullet>0). **Start here next session: pick one of the two new
+## leads below and frame-trace it, or continue reviewing more
+## videos/clips to get a clearer read on whether these are common
+## patterns or one-offs -- no strong signal yet on which** (read this
+## first -- supersedes everything below, including the immediately
+## following calibration-fix section, kept for its own implementation
+## detail)
+
+**User reviewed video4's fresh 6-clip set (post calibration fix): 2/6
+correct (33.3%).** Not a clean comparison to the pre-fix round's 4/8
+(50%) since the clip set changed completely -- the calibration fix's
+own effect is independently verified already (9x sample density,
+byte-identical output on videos 1-3, see the section right below).
+Full per-clip breakdown: `docs/superpowers/DECISIONS.md`, entry
+"video4's post-calibration-fix clips reviewed". Two things are
+genuinely new, not repeats of anything already fixed this session:
+
+- **`id=2` (t=490.7): an undercount** (detected `(1,0)`, true `(3,0)`)
+  -- every wrong clip in every review round so far, this session and
+  every prior one, has been an *overcount*. Not investigated --
+  a plausible but unconfirmed hypothesis is the denser
+  post-calibration-fix sampling now splits a real multi-kill chain
+  across a session boundary (the pre-existing, already-documented
+  "timer-noise session-fragmentation" issue is a candidate mechanism,
+  visible in this same video's sample stream -- see below).
+- **`id=5` (t=547.5): wrong kind entirely** -- detected `bonus_kill
+  (1,0)`, true `(0,1)`, a genuine bullet kill. This breaks the "every
+  true correction has n_bullet=0" pattern that has held across every
+  review round in this entire project until now. Neither this
+  session's group_size fix nor the calibration fix addresses this.
+
+`id=3`/`id=4` (still overcounts, group_size 7 vs true 2 and 5 vs true
+2) look like the same group_size-overestimation family already
+investigated this session, but haven't been re-checked against the
+denser post-calibration-fix samples -- worth confirming this is really
+the same mechanism, not a new variant, before assuming it needs no
+further work.
+
+**Start here next session:** no strong signal on which lead to chase
+first -- pick between:
+1. Frame-trace `id=2`'s undercount (t=490.7) -- a genuinely new
+   failure direction, worth understanding before assuming it's rare.
+2. Frame-trace `id=5`'s wrong-kind result (t=547.5) -- also new, and a
+   different class of bug (mislabeling bonus vs. bullet, not a count
+   error) from everything fixed this session.
+3. Re-check `id=3`/`id=4` specifically to confirm they're still the
+   already-understood group_size-overestimation mechanism post-
+   calibration-fix, not a new variant.
+4. Keep adding cross-validation videos / reviewing more clips before
+   committing to any one investigation -- the sample sizes are still
+   small enough (6 clips per video) that a single review round's
+   pattern could easily be noise.
+No strong opinion yet on which has the best return -- worth a short
+discussion before picking, same as every other fork in this project.
+
 ## Status as of 2026-09-18 (a fourth video) — new root cause found and
 ## fixed: HUD offset calibration could lock onto the wrong offset for
 ## an entire video if the pre-gameplay stretch outlasted its scan
 ## budget. Verified via A/B diff on all four videos (videos 1-3
-## byte-identical, video4 went from 36->327 samples). **Start here next
-## session: manually review video4's fresh 6-clip set** (read this
-## first -- supersedes everything below)
+## byte-identical, video4 went from 36->327 samples). (superseded by
+## the section above -- kept for the calibration fix's own
+## implementation/verification detail, which the section above didn't
+## repeat)
 
 A fourth video was added this session for cross-validation (user's own
 call, after the group_size fix's review showed too little data --11
@@ -50,13 +109,12 @@ gone). **Videos 1-3 produced byte-identical clip lists before and
 after** -- confirms the fix is surgical, zero effect outside the
 specific failure case.
 
-**Start here next session: manually review video4's fresh 6 clips**
-(`scripts/review_sample.py /tmp/biomercs-run4-fixed/manifest.sqlite` --
-re-run the pipeline first if this session's `/tmp` state is gone, see
-"Ephemeral files" below, video 4's URL is
-`https://www.youtube.com/watch?v=zIMN3UNyo2s`). The previous review
-round's data is stale now that the clip set itself changed. Also
-worth knowing about, but not investigated this session: video4's
+**This clip set has since been reviewed** -- see the section above
+("video4's post-calibration-fix clips reviewed") for the results and
+current next step; this pointer is stale, kept for history only. Video
+4's URL is `https://www.youtube.com/watch?v=zIMN3UNyo2s` (re-download
+per "Ephemeral files" below if this session's `/tmp` state is gone).
+Also worth knowing about, but not investigated this session: video4's
 denser sample stream shows rapid session-id churn from timer noise in
 some chaotic stretches (e.g. sessions 401/406/408/409 within 30s) --
 this is the pre-existing, already-documented "timer-noise
