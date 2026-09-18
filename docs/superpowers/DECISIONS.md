@@ -276,3 +276,66 @@ for sid in [161, 163, 166, 167]:
 ```
 Each affected session's samples show the tens-digit flip directly (e.g.
 `session_id=161` around t=398-400s reads `181,102,188,188,...,198,188`).
+
+### 2026-09-17 follow-up: user supplied source material, still short on 3/5/7
+
+User dropped `resources/Steam Screenshots.zip` (gitignored -- 323MB, not
+meant to be committed) containing 105 native 1920x1080 in-game
+screenshots plus `COMBO_ORIGINAL_TEXTURE.png` (384x384, RGBA) and
+`TIMER_ORIGINAL_TEXTURE.png` (512x512, RGBA) -- the actual bitmap-font
+texture atlases RE5 renders the HUD from.
+
+Built a throwaway extraction pipeline (was in the harness scratchpad,
+won't survive a new session, recipe below) that:
+- Locates the combo HUD by thresholding blue-dominant pixels
+  (`b > 120 and b > r + 30`) in the upper-right region of a screenshot,
+  then segments individual digit glyphs by finding column gaps in that
+  mask (digit bands are consistently ~45-55px wide at native res, vs.
+  ~20-40px for the "COMBO" label's letters -- filter on width to tell
+  them apart).
+- Only **7 of the 105** screenshots are actually Mercenaries-mode
+  frames with the combo HUD visible (the rest are other menus/
+  cutscenes/inventory screens -- a naive blue-threshold on a desaturated
+  grayscale menu can false-positive, e.g. `21690_...212145_1.png` and
+  `21690_...212148_1.png` picked up unrelated white UI text; verify
+  visually, don't trust the heuristic alone).
+- Those 7 read combo `010` or `020` only, across genuinely varied
+  backgrounds (dark interior, one overexposed/bright frame, a red-lit
+  hallway) -- good real-footage coverage for digits **0, 1, 2**, but
+  **zero coverage for 3, 5, 7**, which are exactly the digits that need
+  replacing.
+- Also fully segmented `COMBO_ORIGINAL_TEXTURE.png`'s digit row (a real
+  `0123456789` bitmap-font strip at y=[95,155], see reproduction recipe)
+  into 10 individual glyph crops -- genuine ground truth for every
+  digit, usable as one sample among several once the multi-sample
+  matching change lands, though (being a single static atlas crop, not
+  footage) it doesn't by itself solve the background-diversity problem
+  discussed in the prior entry.
+
+**Asked the user how to proceed** given the gap: implement now using
+the atlas for 3/5/7 (with real footage only for 0/1/2), or wait for more
+screenshots reaching higher combos (13, 35, 57+) so every digit gets a
+real varied-background sample before any code changes. **User chose to
+wait.** Nothing implemented yet -- this is a data-collection pause, not
+a technical blocker. When the user returns with more screenshots,
+re-run the same extraction approach (recipe below) rather than
+re-deriving it.
+
+**Reproduction recipe** (scratchpad won't survive a new session):
+```python
+import cv2, numpy as np
+img = cv2.imread(screenshot_path)  # native 1920x1080
+region = img[100:280, 1000:1750]   # combo HUD search window
+b, g, r = cv2.split(region.astype(np.int32))
+mask = ((b > 120) & (b > r + 30)).astype(np.uint8) * 255
+# column-sum the mask, band-split on gaps, keep bands >=45px wide
+# (digits) vs narrower bands (COMBO label letters) -- see this
+# session's DECISIONS.md entry above for the exact column-band logic.
+```
+For the atlas: `COMBO_ORIGINAL_TEXTURE.png` is RGBA
+(`cv2.IMREAD_UNCHANGED`) -- composite alpha onto black to see the
+glyphs (a plain `cv2.imread` drops alpha and shows an almost-blank
+image). The big `0123456789` digit row lives at y=[95,155]; column
+boundaries per digit (x0,x1): 0=[0,38], 1=[40,69], 2=[69,104],
+3=[104,142], 4=[142,179], 5=[179,213], 6=[213,249], 7=[249,282],
+8=[282,319], 9=[319,354].

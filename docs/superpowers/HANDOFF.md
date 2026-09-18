@@ -41,6 +41,25 @@ This is currently blocked on the user, not on investigation -- if they
 haven't brought screenshots yet, ask for them rather than guessing at a
 codebase-only fix.
 
+**Update 2026-09-17 (later same day):** user provided
+`resources/Steam Screenshots.zip` (gitignored, not committed -- 105
+native 1920x1080 screenshots + the real `COMBO_ORIGINAL_TEXTURE.png`/
+`TIMER_ORIGINAL_TEXTURE.png` bitmap-font atlases). Extraction pipeline
+built and run (see DECISIONS.md "2026-09-17 follow-up" entry for the
+full recipe) -- only 7 of 105 screenshots actually show the Mercenaries
+combo HUD, and all 7 read `010` or `020`: good real-footage coverage for
+digits 0/1/2, **none for 3/5/7**. The atlas has clean ground-truth crops
+for all ten digits already segmented (recipe in DECISIONS.md) but no
+background diversity by itself.
+
+**User's call: wait for more screenshots** (asked to reach higher
+combos like 13/35/57+ so 3/5/7 get real-footage samples too) rather
+than implementing now with the atlas standing in for those three. This
+is a data-collection pause, not a technical blocker -- don't re-ask the
+same question next session, just check whether new screenshots showed
+up in `resources/` and pick up from there. If they have, re-run the
+extraction recipe rather than re-deriving it.
+
 ## What this project is
 
 `biomercs-ml` (repo: https://github.com/stLmpp/biomercs-ml, public,
