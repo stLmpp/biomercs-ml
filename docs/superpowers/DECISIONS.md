@@ -339,3 +339,47 @@ image). The big `0123456789` digit row lives at y=[95,155]; column
 boundaries per digit (x0,x1): 0=[0,38], 1=[40,69], 2=[69,104],
 3=[104,142], 4=[142,179], 5=[179,213], 6=[213,249], 7=[249,282],
 8=[282,319], 9=[319,354].
+
+### 2026-09-17 further follow-up: second screenshot batch closes the gap; combo color rule; architecture decided
+
+User supplied a second zip, `resources/21690_20260917222148_1.zip` (159
+more native screenshots). Re-ran the extraction with the blue-only
+detector from the previous entry and initially still found no 5/7 --
+but the user pointed out a screenshot with combo 57 that the detector
+had missed entirely. Root cause: **the combo counter renders blue only
+when its value is an exact multiple of 10 (10, 20, 30...); every other
+value renders white** (confirmed by the user). The extraction script
+only had a blue-pixel heuristic, so it silently missed the common case.
+
+Fixed the detector to catch both (`(b>120 & b>r+30) | (b>150 & g>150 &
+r>150 & |b-r|<40 & |g-r|<40)`), and had to also make the digit/label
+column-width split adaptive (`>= 0.65 * max_band_width`, take the
+leftmost contiguous run of such bands) rather than a fixed `>=45px`
+threshold, because the white font's rendered stroke width differs from
+the blue font's, so a fixed pixel cutoff that worked for one didn't
+transfer to the other. This is a distinct lesson from every prior
+digit-matching bug in this file: those were all about *misreading* a
+rendered digit; this was about a whole **second valid rendering style**
+(different color, different apparent glyph width) that a single-style
+extraction heuristic simply never saw. Re-running with the adaptive
+two-color detector found combo values spanning nearly the full 0-9
+range per digit, including every previously-missing one (3, 5, 7),
+across real footage with genuinely varied backgrounds.
+
+**Architecture decided for the actual fix** (not yet implemented --
+see HANDOFF.md "Update 2026-09-17 (later still)" for the full, current
+plan so it doesn't need re-deriving in a new session):
+`load_digit_templates` moves from one image per digit
+(`dict[str, np.ndarray]`) to multiple sample images per digit
+(`dict[str, list[np.ndarray]]`), backed by a directory-per-digit layout
+(`templates/<set>/<digit>/<sample>.png`) rather than flat filenames
+parsed by convention -- directories were chosen over a filename
+convention like `0_a.png` as the less fragile option. `match_digit`
+takes the max score across a digit's own samples before comparing
+across digits, which is the actual mechanism that fixes the root cause:
+a digit only needs to win with *any one* of several real-footage
+samples, not with a single all-or-nothing template. This restructuring
+necessarily touches all three template sets (`digits_combo`,
+`digits_timer`, `digits_popup`) since they share `load_digit_templates`,
+but only `digits_combo` gets new sample images -- timer/popup's single
+existing templates just move into same-named subdirectories unchanged.
