@@ -1,13 +1,29 @@
 from pathlib import Path
 
 from biomercs_ml import auto_labeler, clip_extractor, config, dataset_manifest, downloader, event_detector, hud_reader
-from biomercs_ml.models import ClipRecord
+from biomercs_ml.models import ClipRecord, HudSample, KillGroup, KillLabel
 
 
 def resolve_video(source: str, download_dir: Path) -> Path:
     if source.startswith("http://") or source.startswith("https://"):
         return downloader.download(source, download_dir)
     return Path(source)
+
+
+def label_kill_groups(samples: list[HudSample]) -> list[tuple[KillGroup, KillLabel]]:
+    sessions: dict[int, list[HudSample]] = {}
+    for sample in samples:
+        sessions.setdefault(sample.session_id, []).append(sample)
+
+    labeled = []
+    for session_id, session_samples in sessions.items():
+        groups = event_detector.detect_kill_groups(session_samples, session_id, all_samples=samples)
+        for group in groups:
+            label = auto_labeler.label_kill_group(group)
+            if label is None:
+                continue
+            labeled.append((group, label))
+    return labeled
 
 
 def run(video_source: str, output_dir: Path, db_path: Path) -> None:
@@ -28,31 +44,21 @@ def run(video_source: str, output_dir: Path, db_path: Path) -> None:
         popup_label_template,
     )
 
-    sessions: dict[int, list] = {}
-    for sample in samples:
-        sessions.setdefault(sample.session_id, []).append(sample)
-
     dataset_manifest.create_db(db_path)
     clips_dir = output_dir / "clips"
 
-    for session_id, session_samples in sessions.items():
-        groups = event_detector.detect_kill_groups(session_samples, session_id, all_samples=samples)
-        for group in groups:
-            label = auto_labeler.label_kill_group(group)
-            if label is None:
-                continue
+    for group, label in label_kill_groups(samples):
+        clip_path = clips_dir / f"{video_path.stem}_{group.session_id}_{group.timestamp_s:.1f}.mp4"
+        clip_extractor.extract_clip(video_path, group.timestamp_s, clip_path)
 
-            clip_path = clips_dir / f"{video_path.stem}_{session_id}_{group.timestamp_s:.1f}.mp4"
-            clip_extractor.extract_clip(video_path, group.timestamp_s, clip_path)
-
-            record = ClipRecord(
-                clip_path=str(clip_path),
-                label_kind=label.kind,
-                n_bonus=label.n_bonus,
-                n_bullet=label.n_bullet,
-                source_video=str(video_path),
-                session_id=session_id,
-                event_timestamp_s=group.timestamp_s,
-                confidence=label.confidence,
-            )
-            dataset_manifest.insert_clip(db_path, record)
+        record = ClipRecord(
+            clip_path=str(clip_path),
+            label_kind=label.kind,
+            n_bonus=label.n_bonus,
+            n_bullet=label.n_bullet,
+            source_video=str(video_path),
+            session_id=group.session_id,
+            event_timestamp_s=group.timestamp_s,
+            confidence=label.confidence,
+        )
+        dataset_manifest.insert_clip(db_path, record)
