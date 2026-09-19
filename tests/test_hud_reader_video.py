@@ -4,6 +4,7 @@ from unittest.mock import patch
 import cv2
 
 from biomercs_ml import config, hud_reader
+from biomercs_ml.models import RawHudSample
 
 VIDEO_PATH = "tests/fixtures/synthetic_static.mp4"
 
@@ -379,3 +380,71 @@ def test_sample_video_parallel_matches_sequential_output():
 
     assert sequential
     assert parallel == sequential
+
+
+def test_is_spurious_timer_spike_true_for_a_lone_reverting_outlier():
+    # video4, t=641.6s -> 641.8s -> 642.0s: background scene geometry (a
+    # wooden support beam) sweeping across the timer's translucent "0"
+    # digit for a few frames within one tick's burst misreads it as "8",
+    # then reverts on the very next tick -- see DECISIONS.md,
+    # "timer-noise-session-fragmentation".
+    assert hud_reader._is_spurious_timer_spike(
+        prev_timer_s=568.0, curr_timer_s=5364.0, next_timer_s=564.0
+    ) is True
+
+
+def test_is_spurious_timer_spike_false_for_normal_countdown():
+    assert hud_reader._is_spurious_timer_spike(
+        prev_timer_s=100.0, curr_timer_s=99.8, next_timer_s=99.6
+    ) is False
+
+
+def test_is_spurious_timer_spike_true_for_a_moderate_outlier_within_the_loosened_jump_tolerance():
+    # video4, t=499.1s -> 499.3s -> 499.5s: a misread (627) landing only
+    # ~50s above the true value doesn't cross SESSION_RESET_JUMP_S on its
+    # own (loosened to tolerate real rare +105s stacked bonuses -- see
+    # config.py), but reverting from it on the very next tick looks like
+    # an oversized drop against the much tighter SESSION_RESET_DROP_S.
+    # prev and next agree with each other here, so curr is still the
+    # outlier regardless of which single pairwise comparison happens to
+    # cross a threshold -- see DECISIONS.md,
+    # "timer-noise-session-fragmentation".
+    assert hud_reader._is_spurious_timer_spike(
+        prev_timer_s=577.0, curr_timer_s=627.0, next_timer_s=577.0
+    ) is True
+
+
+def test_is_spurious_timer_spike_false_for_a_real_sustained_new_round_reset():
+    # A real new-round reset persists (the fresh 2:00 keeps counting down
+    # from there) rather than reverting on the next tick -- must not be
+    # suppressed just because it also crosses is_new_session's
+    # jump/drop thresholds.
+    assert hud_reader._is_spurious_timer_spike(
+        prev_timer_s=580.0, curr_timer_s=120.0, next_timer_s=119.8
+    ) is False
+
+
+def test_assign_session_ids_suppresses_a_lone_reverting_timer_spike():
+    raw_samples = [
+        RawHudSample(timestamp_s=641.4, timer_value_s=568.0, combo_value=149, confidence=0.7),
+        RawHudSample(timestamp_s=641.6, timer_value_s=568.0, combo_value=149, confidence=0.7),
+        RawHudSample(timestamp_s=641.8, timer_value_s=5364.0, combo_value=149, confidence=0.68),
+        RawHudSample(timestamp_s=642.0, timer_value_s=564.0, combo_value=149, confidence=0.71),
+        RawHudSample(timestamp_s=642.2, timer_value_s=564.0, combo_value=149, confidence=0.74),
+    ]
+    samples = hud_reader._assign_session_ids(raw_samples)
+    # The spike tick's timer reading is untrustworthy and dropped
+    # entirely (the final sample_video filter already drops any sample
+    # with a None timer_value_s).
+    assert [s.timestamp_s for s in samples] == [641.4, 641.6, 642.0, 642.2]
+    assert {s.session_id for s in samples} == {0}
+
+
+def test_assign_session_ids_still_splits_on_a_real_session_change():
+    raw_samples = [
+        RawHudSample(timestamp_s=10.0, timer_value_s=580.0, combo_value=140, confidence=0.8),
+        RawHudSample(timestamp_s=10.2, timer_value_s=120.0, combo_value=0, confidence=0.8),
+        RawHudSample(timestamp_s=10.4, timer_value_s=119.8, combo_value=0, confidence=0.8),
+    ]
+    samples = hud_reader._assign_session_ids(raw_samples)
+    assert [s.session_id for s in samples] == [0, 1, 1]

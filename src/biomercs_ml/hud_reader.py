@@ -312,6 +312,24 @@ def is_new_session(prev_timer_s: float, curr_timer_s: float) -> bool:
     return delta < -config.SESSION_RESET_DROP_S or delta > config.SESSION_RESET_JUMP_S
 
 
+def _is_spurious_timer_spike(prev_timer_s: float, curr_timer_s: float, next_timer_s: float) -> bool:
+    # A tick's timer reading that conflicts with a neighbor on either
+    # side, when that same neighbor pair otherwise agrees with each
+    # other, is a transient misread (e.g. background scene geometry
+    # sweeping across the timer's translucent digits for a few frames),
+    # not a real session boundary -- a real new-round reset persists
+    # instead of reverting. Checked in both directions, not just
+    # prev->curr: SESSION_RESET_JUMP_S is loosened to tolerate real rare
+    # stacked bonuses (up to ~105s), so a moderate misread (e.g. +50s)
+    # can itself land under that ceiling and go undetected going up,
+    # while *reverting* from it on the next tick looks like an oversized
+    # drop against the much tighter SESSION_RESET_DROP_S. See
+    # DECISIONS.md, "timer-noise-session-fragmentation".
+    return not is_new_session(prev_timer_s, next_timer_s) and (
+        is_new_session(prev_timer_s, curr_timer_s) or is_new_session(curr_timer_s, next_timer_s)
+    )
+
+
 def _calibrate_offset(
     cap: cv2.VideoCapture,
     combo_label_template: np.ndarray,
@@ -490,18 +508,41 @@ def sample_video(
             for future in futures:
                 raw_samples.extend(future.result())
 
+    return _assign_session_ids(raw_samples)
+
+
+def _assign_session_ids(raw_samples: list[RawHudSample]) -> list[HudSample]:
+    # A lone tick whose timer reading conflicts with its neighbor on
+    # both sides -- disagreeing with the predecessor, reverted by the
+    # very next reading -- is a transient misread, not a real
+    # discontinuity. Identify those up front (using the raw,
+    # never-corrected readings on both sides, not each other's
+    # corrections) so they never reach the sequential pass below and
+    # spuriously split a session.
+    valid_indices = [i for i, raw in enumerate(raw_samples) if raw.timer_value_s is not None]
+    spurious_indices = set()
+    for pos in range(1, len(valid_indices) - 1):
+        prev_i, curr_i, next_i = valid_indices[pos - 1], valid_indices[pos], valid_indices[pos + 1]
+        if _is_spurious_timer_spike(
+            raw_samples[prev_i].timer_value_s,
+            raw_samples[curr_i].timer_value_s,
+            raw_samples[next_i].timer_value_s,
+        ):
+            spurious_indices.add(curr_i)
+
     samples = []
     session_id = 0
     last_timer_value: float | None = None
-    for raw in raw_samples:
-        if raw.timer_value_s is not None:
-            if last_timer_value is not None and is_new_session(last_timer_value, raw.timer_value_s):
+    for i, raw in enumerate(raw_samples):
+        timer_value = None if i in spurious_indices else raw.timer_value_s
+        if timer_value is not None:
+            if last_timer_value is not None and is_new_session(last_timer_value, timer_value):
                 session_id += 1
-            last_timer_value = raw.timer_value_s
+            last_timer_value = timer_value
 
         samples.append(
             HudSample(
-                raw.timestamp_s, session_id, raw.timer_value_s, raw.combo_value,
+                raw.timestamp_s, session_id, timer_value, raw.combo_value,
                 raw.confidence, raw.pickup_popup,
             )
         )

@@ -145,8 +145,20 @@ SAMPLE_VOTE_FRAMES = 11
 PROGRESS_LOG_INTERVAL_PERCENT = 10
 
 SAMPLE_INTERVAL_S = 0.2
-SESSION_RESET_DROP_S = 1.0
-SESSION_RESET_JUMP_S = 25.0
+# A new round always starts at exactly 2:00 (120s) -- per the author's
+# own top-level competitive experience. A real transition is therefore
+# always a huge change (banked bonus time regularly exceeds 580s before
+# a reset to 120s), while real per-tick digit-read noise during dense
+# combat tops out far below these thresholds (real footage: video4,
+# t=606.6-649.0s window, noisiest observed drop -12s) -- see
+# DECISIONS.md, "timer-noise-session-fragmentation". The prior values
+# (1.0 / 25.0) were tight enough to misclassify both this ordinary read
+# noise (as a drop) and legitimate stacked bonuses -- a map time-bonus
+# pickup (+90) landing in the same tick as a kill bonus (+5), or rarer
+# still, per the author's own confirmation, up to ~+105 -- as fake
+# session resets.
+SESSION_RESET_DROP_S = 30.0
+SESSION_RESET_JUMP_S = 120.0
 LABEL_TOLERANCE_S = 1.0
 
 CLIP_BEFORE_S = 2.0

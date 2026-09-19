@@ -61,8 +61,33 @@ def test_is_new_session_false_for_plausible_bonus_jump():
     assert hud_reader.is_new_session(prev_timer_s=100.0, curr_timer_s=114.8) is False
 
 
+def test_is_new_session_false_for_a_large_stacked_bonus_jump():
+    # A map time-bonus pickup (+90) landing in the same tick as a kill
+    # bonus (+5) -- rare but real per the author's own top-level
+    # competitive experience, and well below a real new-round reset
+    # (always a fresh 2:00 / 120s, see
+    # test_is_new_session_true_for_a_real_new_round_reset).
+    assert hud_reader.is_new_session(prev_timer_s=100.0, curr_timer_s=205.0) is False
+
+
 def test_is_new_session_true_for_backward_jump():
     assert hud_reader.is_new_session(prev_timer_s=100.0, curr_timer_s=30.0) is True
+
+
+def test_is_new_session_false_for_real_footage_drop_noise():
+    # video4, t=606.6s -> t=607.0s: a real, noisy (but not misread-level
+    # implausible) digit-read dip during dense combat, not a real new
+    # round -- see DECISIONS.md, "timer-noise-session-fragmentation".
+    assert hud_reader.is_new_session(prev_timer_s=586.0, curr_timer_s=574.0) is False
+
+
+def test_is_new_session_true_for_a_real_new_round_reset():
+    # A new round always starts at exactly 2:00 (120s) -- per the
+    # author's own top-level competitive experience. A prior round
+    # ending with substantial banked bonus time (real footage regularly
+    # exceeds 580s here) resetting to 120s is a drop far larger than any
+    # real per-tick read noise or plausible bonus stack.
+    assert hud_reader.is_new_session(prev_timer_s=580.0, curr_timer_s=120.0) is True
 
 
 def test_is_new_session_true_for_implausibly_large_jump():
