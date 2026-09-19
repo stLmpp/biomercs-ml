@@ -120,25 +120,25 @@ samples); see `combo-template-defects` in FIXED_BUGS.md for that part.
 > go to the user's original plan (real ML with reinforcement + the user's
 > manual review). See DECISIONS.md § 2026-09-19 (a ninth session).
 
-**OPEN.** A run has **~150 kills**; the pipeline emits ~7 clips/video
-(36 clips across all 5 videos post-session-fix, 16 before) -- roughly 5%
-recall. The user's bar: detect at least ~140 for it to start being good.
-Review rounds only score clips that exist, so they hide this. Ground
-truth for video4 t=480-650s: **49 real kills (36 bonus + 13 bullet)**
-(times/list in DECISIONS.md § 2026-09-19; absolute time ~= 480 + clip
-seconds - 3).
-Measured causes: the combo HUD is readable in only **44%** of ticks (the
-game hides it between kills), and `detect_kill_groups` groups by combo
-rise between *adjacent kept samples*, so kills seconds apart merge into
-one group (e.g. combo 104@497.7s -> 108@503.9s = 4 kills, 1 clip). Meanwhile
-the `+05 sec.` popup -- already computed each tick by `is_popup_visible`,
-but only used to exclude map pickups -- gave 24 episodes with **0 orphans**
-and matched 29/32 truth bonus-seconds. **Constraint:** simultaneous bonus
-multi-kills show only ONE popup, so the count must come from the timer
-jump (+5 each). **Agreed direction (not implemented):** build a recall
-benchmark from the 49-kill truth first, then popup-driven bonus detection
-with combo as the secondary (bullet) signal.
+**PARTIALLY FIXED (ninth session) -- bonus kills mostly solved, BULLET kills
+still essentially undetected.** A run has **~150 kills**; the old pipeline
+emitted ~7 clips/video (~5%). Popup-driven detection now emits **63-79
+clips/video** and **102-138 labeled kills/video** (user's bar: >=140), with
+nearly all of them `bonus_kill`. On the 49-kill benchmark window:
+recall **34.7% -> 75.5%**, precision 100%, exact-count accuracy 0% -> 54%.
+**Still broken:** (1) *bullet kills* -- only ~1 `bullet_kill` clip per video
+although ~27% of real kills are bullets: no popup exists for them and the
+combo is too sparse (readable ~44% of ticks) to place them; (2) simultaneous
+bonus+bullet kills lose their bullet count; (3) 3+ kill clusters over ~4s
+exceed one 4s clip; (4) episodes with no usable pre/post timer ticks are
+dropped (e.g. 569.0, 606.6 in video4); (5) session fragmentation outside the
+480-650s window (video4 still shows ~100 sessions) -- not re-investigated.
+The user decided this popup approach is the LAST OCR attempt; whether the
+remaining gap justifies the ML plan is their call. Ground truth:
+`benchmarks/video4_t480-650.json`; measure with
+`scripts/benchmark_recall.py`.
 - DECISIONS.md § "2026-09-19 (an eighth session)" -> "THE BIG FINDING"
+- DECISIONS.md § "Ninth session: what was built and measured" and "A/B on real footage"
 
 ### `fabricated-bullet-count-on-bonus-kill` ★
 **OPEN** (umbrella/symptom). `auto_labeler.label_kill_group` computes

@@ -16,6 +16,23 @@ the time) that the other three files don't repeat.
 
 ---
 
+## Status as of 2026-09-19 (a ninth session) -- recall benchmark, then
+## popup-driven detection (declared the LAST OCR attempt)
+
+User-directed: popup-driven detection is the final HUD/OCR attempt; if it
+falls short we return to the original plan (real ML with reinforcement +
+the user's review). Order of events: committed the pending eighth-session
+work; built the recall benchmark (baseline 17/49, 0% exact counts); designed
+and got approval for popup-episode detection; found the old "timer AND combo
+readable" filter had discarded half the popup signal; iterated on the
+benchmark (median timer windows -> timer lead/merge -> no invented bullets ->
+popup-only ticks) to 37/49 recall, 100% precision, 54% exact counts; ran the
+real-footage A/B (first attempt died from a missing `__main__` guard with the
+Windows process pool; second exposed a missing plausibility cap, n_bonus up
+to 62) and got 63-79 clips and 102-138 labeled kills per video. Bullet kills
+remain ~undetected. Full detail: DECISIONS.md § "2026-09-19 (a ninth
+session)" and its two sub-sections.
+
 ## Status as of 2026-09-19 (an eighth session) — moved to Windows; fresh
 ## review round; root-caused and fixed `timer-noise-session-fragmentation`
 ## (52 -> 1 sessions in a real window); then discovered the real problem:

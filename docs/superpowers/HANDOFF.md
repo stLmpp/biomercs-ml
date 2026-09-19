@@ -49,11 +49,6 @@ The user speaks Portuguese; replies in pt-br are welcome.
 t=480-650s went 52 -> 1 spurious sessions. `review_sample.py` is
 cross-platform. See FIXED_BUGS.md `timer-session-thresholds-and-spike-guard`.
 
-**UNCOMMITTED in the working tree:** `dataset_manifest.fetch_unreviewed`
-(+ test in `tests/test_dataset_manifest.py`), `review_sample.py`'s new
-`unreviewed` mode, and these doc updates. Suite: **127 passing**.
-Commit them first (one commit for the code+test, one for docs).
-
 **The real problem (new #1, `low-kill-recall` in KNOWN_BUGS.md):** a run has
 ~150 kills; the pipeline emits ~7 clips/video (~5% recall; user's bar is
 >=140). Cause: combo HUD readable in only 44% of ticks and
@@ -74,30 +69,40 @@ the user's own manual review as the signal. Don't start another round of
 OCR heuristics/threshold tuning after this one -- escalate to the user. See
 DECISIONS.md § "2026-09-19 (a ninth session)".
 
-**Ninth session -- steps 1-2 below are DONE.** The recall benchmark exists:
-`benchmarks/video4_t480-650.json` (49-kill ground truth),
-`src/biomercs_ml/benchmark.py` (pure `score_detections`),
-`pipeline.label_kill_groups` (shared with `pipeline.run`), and
-`uv run python scripts/benchmark_recall.py [--refresh]` (raw samples cached
-in `tmp\benchmark\`; ~2 min uncached, `--refresh` after touching
-`hud_reader`). **Baseline before any detection change: recall 17/49 kills
-(34.7%), precision 9/9 clips (100%), count accuracy 0/9 (0%)**, 416
-samples, 1 session. A clip "covers" a kill if the kill falls in its
-+-2s window (`CLIP_BEFORE_S`/`CLIP_AFTER_S`); recall is weighted by kill
-count. Note recall 34.7% is *generous* (merged multi-kill clips still
-cover neighbours) -- count accuracy is the honest failure signal.
+**Ninth session -- DONE (all committed and pushed):**
+- Recall benchmark: `benchmarks/video4_t480-650.json` (49-kill truth),
+  `benchmark.py` (`score_detections`), `pipeline.label_kill_groups` (shared
+  with `pipeline.run`), `uv run python scripts/benchmark_recall.py
+  [--refresh]` (raw samples cached in `tmp\benchmark\`, ~2 min uncached;
+  `--refresh` after touching `hud_reader`). A clip covers a kill if it falls
+  in its +-2s window; recall is weighted by kill count.
+- Popup-driven detection implemented (`event_detector.detect_popup_kill_groups`,
+  `HudSample.bonus_popup`, popup-only ticks kept). **Benchmark: recall 17/49
+  (34.7%) -> 37/49 (75.5%), precision 100%, exact-count accuracy 0/9 -> 13/24
+  (54%)** on video4 t=480-650. Full progression, findings and REJECTED
+  variants: DECISIONS.md § "Ninth session: what was built and measured".
+- Real-footage A/B on all 5 videos DONE (`tmp\biomercs-popup-run{,2,3,4,5}`,
+  ~450s): clips 36 -> 350 (63-79 per video), labeled kills 102-138 per
+  video (~150 real; bar >=140), but ~all are `bonus_kill` -- **bullet kills
+  are ~absent (1/video)**. Not yet reviewed by the user. Details:
+  DECISIONS.md § "Ninth session: A/B on real footage". Windows: any script
+  using the process pool needs an `if __name__ == "__main__":` guard.
+
+**Where we are vs the user's bar (>=140 of ~150 kills, ~93%):** still short on
+the one measured window (75.5%). The hole is mostly bullet kills (no popup,
+sparse combo) and 3+ kill clusters, plus episodes with no usable timer
+ticks. **Remember the strategic decision above: this was the LAST OCR
+attempt -- if the user judges it insufficient, go to the ML plan, do not
+tune more.**
 
 **Start here next session:**
-1. (done) `git status`, `uv run pytest`, commit pending work.
-2. (done) Build the recall benchmark and get the baseline.
-3. Then **popup-driven bonus detection** (one event per popup episode,
-   bonus count from timer jump, bullet from combo rise minus bonuses).
-   Short in-chat design + explicit user approval before implementing.
-4. Later: find where the remaining session fragmentation is (clip names
-   still show session ids 47/49/55/98); finish reviewing round-2 clips
-   (`review_sample.py "tmp\biomercs-runN\manifest.sqlite" unreviewed`,
-   runs 2-5 have unreviewed clips); re-measure
-   `fabricated-bullet-count-on-bonus-kill` after recall is fixed.
+1. Read the A/B result and the user's verdict on it (review a sample of
+   `tmp\biomercs-popup-run{,2,3,4,5}` clips with
+   `uv run python scripts/review_sample.py "tmp\biomercs-popup-runN\manifest.sqlite" 20`).
+2. If accepted: remaining OCR-side cleanups (session fragmentation outside
+   the 480-650s window; `fabricated-bullet-count-on-bonus-kill` re-measure).
+3. If not: start the ML plan (reinforcement + the user's own review) --
+   the reviewed manifests already hold labelled clips to seed it.
 
 ## Previous status (2026-09-18, a seventh session) — superseded, kept for context
 
@@ -129,7 +134,7 @@ transfer there (see KNOWN_BUGS.md for why).
    small trained classifier), since the waist-notch geometry doesn't
    generalize to this font.
 
-Full test suite: `uv run pytest -v` — should be 117 passing as of the seventh session (127 now, see the eighth-session status above). Run it first
+Full test suite: `uv run pytest -v` — should be 117 passing as of the seventh session (165 as of the ninth session). Run it first
 thing to confirm nothing's broken.
 
 ## Ephemeral files — will NOT exist in a new session

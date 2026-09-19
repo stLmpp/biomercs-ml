@@ -2725,3 +2725,33 @@ the bonus ones left are episodes whose timer readings are missing/garbage
 (569.0, 606.6 have no valid pre-window ticks) plus long clusters (3+ kills
 over ~4s) that one 4s clip cannot cover. Count accuracy 54% is dominated by
 clustered multi-kills and merged episodes.
+
+### Ninth session: A/B on real footage (all 5 videos)
+
+Ran the full pipeline on `tmp\biomercs-footage{,2,3,4,5}` (new output dirs
+`tmp\biomercs-popup-run{,2,3,4,5}`, old runs kept for their reviews).
+Whole run: ~450s (parallel sampler). **A first A/B run exposed a missing
+guard**: episodes with `n_bonus` up to 62 (map pickups / timer misreads) --
+the old detector's `MAX_PLAUSIBLE_GROUP_SIZE` cap had not been carried over.
+Fixed (test first) and re-measured:
+
+| video | old clips / kills | new clips / labeled kills | new kinds |
+|---|---|---|---|
+| 1 | 6 / 23 | 73 / 138 | 70 bonus, 1 bullet, 2 mixed |
+| 2 | 9 / 30 | 79 / 109 | 78 bonus, 1 mixed |
+| 3 | 6 / 30 | 68 / 109 | 66 bonus, 2 mixed |
+| 4 | 10 / 32 | 63 / 102 | 60 bonus, 1 bullet, 2 mixed |
+| 5 | 5 / 17 | 67 / 119 | 66 bonus, 1 mixed |
+
+Total clips 36 -> 350. Labeled kills per video 102-138 against ~150 real;
+**these are labels, not verified kills** -- only the 49-kill window is
+truth-checked (75.5% recall, 54% exact counts there). Bullet kills are
+essentially absent (1 per video). Sessions still fragment outside the
+benchmark window (videos 1/3/4 show 56/97/100 sessions). Not yet reviewed by
+the user: review a sample of the new manifests to learn real accuracy.
+
+**Windows gotcha found:** a script that uses `sample_video`'s process pool
+MUST guard its entry with `if __name__ == "__main__":` -- otherwise each
+worker re-runs the script and the pool dies with `BrokenProcessPool`
+(the log shows "=== video 1/5 ===" repeated). `python -c` snippets don't hit
+this.
