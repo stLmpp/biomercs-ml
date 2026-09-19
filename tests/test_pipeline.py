@@ -46,3 +46,29 @@ def test_label_kill_groups_never_mixes_combo_across_sessions():
     samples = [_hud_sample(0.0, 100.0, 5), _hud_sample(0.2, 99.8, 9, session_id=1)]
 
     assert pipeline.label_kill_groups(samples) == []
+
+
+def test_label_kill_groups_ignores_samples_whose_combo_is_unreadable():
+    samples = [
+        _hud_sample(0.0, 100.0, 5),
+        _hud_sample(0.1, 99.9, None),
+        _hud_sample(0.2, 99.8, 5),
+        _hud_sample(0.4, 104.6, 6),
+    ]
+
+    labeled = pipeline.label_kill_groups(samples)
+
+    assert [(group.timestamp_s, label.kind) for group, label in labeled] == [(0.4, "bonus_kill")]
+
+
+def test_label_kill_groups_labels_a_popup_bonus_kill_even_when_combo_is_never_readable():
+    samples = [
+        HudSample(t, 0, 100.0 - t + (5.0 if t >= 1.0 else 0.0), None, 0.9, bonus_popup=1.0 <= t <= 1.2)
+        for t in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0)
+    ]
+
+    labeled = pipeline.label_kill_groups(samples)
+
+    assert [(group.timestamp_s, label.kind, label.n_bonus) for group, label in labeled] == [
+        (1.0, "bonus_kill", 1)
+    ]

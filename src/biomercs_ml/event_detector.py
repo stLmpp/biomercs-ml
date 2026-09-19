@@ -1,3 +1,7 @@
+import math
+from dataclasses import replace
+from statistics import median
+
 from biomercs_ml import config
 from biomercs_ml.models import HudSample, KillGroup
 
@@ -191,3 +195,105 @@ def detect_kill_groups(
             )
         )
     return groups
+
+
+def _combo_readable(samples: list[HudSample]) -> list[HudSample]:
+    return [s for s in samples if s.timer_value_s is not None and s.combo_value is not None]
+
+
+def _bonus_popup_episodes(samples: list[HudSample]) -> list[list[HudSample]]:
+    episodes: list[list[HudSample]] = []
+    for sample in samples:
+        if not sample.bonus_popup:
+            continue
+        if episodes and sample.timestamp_s - episodes[-1][-1].timestamp_s <= config.POPUP_EPISODE_MAX_GAP_S:
+            episodes[-1].append(sample)
+            continue
+        episodes.append([sample])
+    return episodes
+
+
+def _bonus_episode_group(
+    episode: list[HudSample],
+    all_samples: list[HudSample],
+    session_id: int,
+    previous_end_s: float,
+    next_start_s: float,
+) -> tuple[KillGroup, int] | None:
+    start_s = episode[0].timestamp_s
+    end_s = episode[-1].timestamp_s
+    if _pickup_nearby(all_samples, start_s) or _pickup_nearby(all_samples, end_s):
+        return None
+    # The timer windows must not reach into a neighboring episode, or its
+    # own +5s jump would be counted as this episode's.
+    before = [
+        s for s in all_samples
+        if max(previous_end_s, start_s - config.POPUP_TIMER_WINDOW_S) <= s.timestamp_s < start_s
+        and s.timer_value_s is not None
+    ]
+    after = [
+        s for s in all_samples
+        if end_s <= s.timestamp_s <= end_s + config.POPUP_TIMER_WINDOW_S
+        and s.timestamp_s < next_start_s
+        and s.timer_value_s is not None
+    ]
+    if not before or not after:
+        return None
+
+    timer_before_s = median(_decay_adjusted_timer(s, start_s) for s in before)
+    timer_after_s = median(_decay_adjusted_timer(s, end_s) for s in after)
+    elapsed_s = end_s - start_s
+    # A simultaneous multi-kill shows a single popup, so the kill count
+    # can only come from the timer jump (+5s each).
+    n_bonus = round((timer_after_s - timer_before_s + elapsed_s) / 5.0)
+    if n_bonus < 1:
+        return None
+    group = KillGroup(
+        session_id=session_id,
+        timestamp_s=start_s,
+        group_size=n_bonus,
+        timer_before_s=timer_before_s,
+        timer_after_s=timer_after_s,
+        elapsed_s=elapsed_s,
+        confidence=min(before[-1].confidence, after[-1].confidence),
+    )
+    return group, n_bonus
+
+
+def detect_popup_kill_groups(
+    session_samples: list[HudSample],
+    session_id: int,
+    all_samples: list[HudSample] | None = None,
+) -> list[KillGroup]:
+    search_samples = all_samples if all_samples is not None else session_samples
+    episodes = _bonus_popup_episodes(session_samples)
+    previous_ends_s = [-math.inf] + [e[-1].timestamp_s for e in episodes[:-1]]
+    next_starts_s = [e[0].timestamp_s for e in episodes[1:]] + [math.inf]
+    bonus_groups = [
+        bonus
+        for episode, previous_end_s, next_start_s in zip(episodes, previous_ends_s, next_starts_s)
+        if (bonus := _bonus_episode_group(episode, search_samples, session_id, previous_end_s, next_start_s))
+        is not None
+    ]
+    # The combo is sparse (unreadable much of the time), so it is only the
+    # secondary signal: it explains whatever kills the popups did not.
+    combo_groups = detect_kill_groups(
+        _combo_readable(session_samples), session_id, all_samples=_combo_readable(search_samples)
+    )
+
+    groups: list[KillGroup] = []
+    unattached = bonus_groups
+    for combo_group in combo_groups:
+        window_start_s = combo_group.timestamp_s - combo_group.elapsed_s - config.TIMER_DELTA_SEARCH_WINDOW_S
+        attached = [b for b in unattached if window_start_s <= b[0].timestamp_s <= combo_group.timestamp_s]
+        if not attached:
+            groups.append(combo_group)
+            continue
+        unattached = [b for b in unattached if b not in attached]
+        residual_bullets = combo_group.group_size - sum(n_bonus for _, n_bonus in attached)
+        if residual_bullets > 0:
+            last_group, last_n_bonus = attached[-1]
+            attached[-1] = (replace(last_group, group_size=last_n_bonus + residual_bullets), last_n_bonus)
+        groups.extend(group for group, _ in attached)
+    groups.extend(group for group, _ in unattached)
+    return sorted(groups, key=lambda g: g.timestamp_s)

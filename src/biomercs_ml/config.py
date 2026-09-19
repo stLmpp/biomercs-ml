@@ -172,6 +172,19 @@ CLIP_AFTER_S = 2.0
 # guessing how to split the credit.
 PICKUP_EXCLUSION_WINDOW_S = 5.0
 
+# Consecutive "+05 sec." popup ticks closer than this belong to one popup
+# episode (one on-screen popup, however many kills it covers). Two ticks
+# is SAMPLE_INTERVAL_S * 2: it bridges a single tick whose popup read
+# failed, without joining two genuinely separate kills.
+POPUP_EPISODE_MAX_GAP_S = 0.5
+
+# How far before/after a popup episode its bonus is measured, as the
+# median of the decay-adjusted timer readings in that span. A median (not
+# the min/max event_detector's combo-pair logic uses) because single-tick
+# timer misreads (see DECISIONS.md, timer-noise-session-fragmentation)
+# would otherwise inflate the +5s-per-kill count.
+POPUP_TIMER_WINDOW_S = 1.5
+
 # The combo counter only ever increases during a session (it can drop
 # to near zero on a rare genuine combo break, but never dips by a small
 # amount and then climbs back to exactly where it was). A rise that

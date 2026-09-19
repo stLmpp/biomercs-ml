@@ -479,6 +479,17 @@ def test_assign_session_ids_suppresses_a_lone_reverting_timer_spike():
     assert {s.session_id for s in samples} == {0}
 
 
+def test_assign_session_ids_keeps_ticks_with_unreadable_combo_for_timer_and_popup_signal():
+    raw_samples = [
+        RawHudSample(timestamp_s=10.0, timer_value_s=100.0, combo_value=None, confidence=0.5),
+        RawHudSample(timestamp_s=10.2, timer_value_s=None, combo_value=None, confidence=0.5, bonus_popup=True),
+        RawHudSample(timestamp_s=10.4, timer_value_s=None, combo_value=None, confidence=0.5),
+    ]
+    samples = hud_reader._assign_session_ids(raw_samples)
+    # 10.0 carries a timer reading, 10.2 carries a popup; 10.4 carries nothing.
+    assert [s.timestamp_s for s in samples] == [10.0, 10.2]
+
+
 def test_assign_session_ids_still_splits_on_a_real_session_change():
     raw_samples = [
         RawHudSample(timestamp_s=10.0, timer_value_s=580.0, combo_value=140, confidence=0.8),

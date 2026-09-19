@@ -17,7 +17,7 @@ def label_kill_groups(samples: list[HudSample]) -> list[tuple[KillGroup, KillLab
 
     labeled = []
     for session_id, session_samples in sessions.items():
-        groups = event_detector.detect_kill_groups(session_samples, session_id, all_samples=samples)
+        groups = event_detector.detect_popup_kill_groups(session_samples, session_id, all_samples=samples)
         for group in groups:
             label = auto_labeler.label_kill_group(group)
             if label is None:

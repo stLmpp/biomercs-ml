@@ -551,4 +551,10 @@ def _assign_session_ids(raw_samples: list[RawHudSample]) -> list[HudSample]:
             )
         )
 
-    return [s for s in samples if s.timer_value_s is not None and s.combo_value is not None]
+    # A tick with an unreadable combo still carries the popup flags and a
+    # timer reading that popup-driven detection needs; only ticks with
+    # neither are useless.
+    return [
+        s for s in samples
+        if s.timer_value_s is not None or s.bonus_popup or s.pickup_popup
+    ]
