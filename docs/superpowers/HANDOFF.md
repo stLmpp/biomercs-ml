@@ -34,7 +34,57 @@ Read before touching `hud_reader.py`/`event_detector.py`:
 2. `AGENTS.md` — Python/coding conventions for this repo.
 3. `KNOWN_BUGS.md` — don't re-investigate something already tracked.
 
-## Current status (as of 2026-09-18, a seventh session)
+## Current status (as of 2026-09-19, an eighth session) — READ THIS FIRST
+
+**Environment is now Windows** (`D:\Projects\biomercs-ml`, PowerShell +
+Git Bash). Source videos are already in the repo's gitignored
+`tmp\biomercs-footage{,2,3,4,5}\source.mp4`; pipeline outputs in
+`tmp\biomercs-run{,2,3,4,5}\`. Use project-relative `tmp\...` paths --
+never `/tmp` (see `windows-path-and-shell-gotchas` in KNOWN_BUGS.md).
+The user speaks Portuguese; replies in pt-br are welcome.
+
+**Done this session (pushed, commits `5575ae3` + `1119d68`):**
+`timer-noise-session-fragmentation` mostly fixed -- `SESSION_RESET_JUMP_S`
+120 / `SESSION_RESET_DROP_S` 30 + `_is_spurious_timer_spike` guard; video4
+t=480-650s went 52 -> 1 spurious sessions. `review_sample.py` is
+cross-platform. See FIXED_BUGS.md `timer-session-thresholds-and-spike-guard`.
+
+**UNCOMMITTED in the working tree:** `dataset_manifest.fetch_unreviewed`
+(+ test in `tests/test_dataset_manifest.py`), `review_sample.py`'s new
+`unreviewed` mode, and these doc updates. Suite: **127 passing**.
+Commit them first (one commit for the code+test, one for docs).
+
+**The real problem (new #1, `low-kill-recall` in KNOWN_BUGS.md):** a run has
+~150 kills; the pipeline emits ~7 clips/video (~5% recall; user's bar is
+>=140). Cause: combo HUD readable in only 44% of ticks and
+`detect_kill_groups` groups by combo rise between adjacent kept samples,
+merging kills seconds apart. The `+05 sec.` popup (already computed by
+`is_popup_visible`, currently only used to exclude pickups) matched the
+user's ground truth with 24 episodes / 0 orphans / 29 of 32 bonus-seconds.
+**Simultaneous bonus multi-kills show only ONE popup**, so kill *count*
+must come from the timer jump (+5 each).
+**Ground truth:** 49 kills in video4 t=480-650s (list + the -3s time
+alignment rule in DECISIONS.md § 2026-09-19).
+
+**Start here next session (agreed with the user, nothing started yet):**
+1. `git status`, run `uv run pytest`, commit the pending work.
+2. Build the **recall benchmark**: ground-truth fixture from the 49-kill
+   list (abs time ~= 480 + clip_seconds - 3), a pure scoring function
+   (kills covered / count accuracy / clip precision) in a small
+   `benchmark.py` with tests (TDD), and a script that runs
+   `_sample_range` -> `_assign_session_ids` -> `detect_kill_groups` ->
+   `label_kill_group` over the window and scores it (cache the ~2 min raw
+   samples under `tmp\`). Get the baseline number before changing anything.
+3. Then **popup-driven bonus detection** (one event per popup episode,
+   bonus count from timer jump, bullet from combo rise minus bonuses).
+   Short in-chat design + explicit user approval before implementing.
+4. Later: find where the remaining session fragmentation is (clip names
+   still show session ids 47/49/55/98); finish reviewing round-2 clips
+   (`review_sample.py "tmp\biomercs-runN\manifest.sqlite" unreviewed`,
+   runs 2-5 have unreviewed clips); re-measure
+   `fabricated-bullet-count-on-bonus-kill` after recall is fixed.
+
+## Previous status (2026-09-18, a seventh session) — superseded, kept for context
 
 The combo font's `3`-vs-`8`/`9` misread is **fixed** (`combo-3-vs-8-9-misread`
 in FIXED_BUGS.md — a geometric "waist notch" tie-breaker, TDD'd, 110
@@ -51,7 +101,7 @@ The timer font's own version of the same confusion
 (`timer-3-vs-8-9-misread`) is **still open** — the same fix doesn't
 transfer there (see KNOWN_BUGS.md for why).
 
-**Start here next session:**
+**(Superseded by the list above) old start-here list:**
 1. **`fabricated-bullet-count-on-bonus-kill`** (KNOWN_BUGS.md) — now that
    `combo-2-vs-8-misread` (its main known driver) is fixed, a fresh
    review round would confirm how much it actually improved and whether
@@ -64,10 +114,36 @@ transfer there (see KNOWN_BUGS.md for why).
    small trained classifier), since the waist-notch geometry doesn't
    generalize to this font.
 
-Full test suite: `uv run pytest -v` — should be 117 passing. Run it first
+Full test suite: `uv run pytest -v` — should be 117 passing as of the seventh session (127 now, see the eighth-session status above). Run it first
 thing to confirm nothing's broken.
 
 ## Ephemeral files — will NOT exist in a new session
+
+**UPDATE (Windows, 2026-09-19): the section below is the old macOS/`/tmp`
+flow.** On this machine the videos are already downloaded into the repo's
+own gitignored `tmp\biomercs-footage{,2,3,4,5}\source.mp4`, so nothing
+needs re-downloading. To regenerate outputs (PowerShell; clear old output
+first or stale rows crash the review script):
+```powershell
+Remove-Item -Recurse -Force tmp\biomercs-run,tmp\biomercs-run2,tmp\biomercs-run3,tmp\biomercs-run4,tmp\biomercs-run5 -ErrorAction SilentlyContinue
+uv run python -c "
+import time
+from pathlib import Path
+from biomercs_ml import pipeline
+videos = ['', '2', '3', '4', '5']
+t0 = time.monotonic()
+for i, s in enumerate(videos, start=1):
+    out = Path(f'tmp/biomercs-run{s}')
+    print(f'\n=== video {i}/{len(videos)} ===')
+    pipeline.run(str(Path(f'tmp/biomercs-footage{s}/source.mp4')), out, out / 'manifest.sqlite')
+    print(f'--- video {i} done (total elapsed {time.monotonic() - t0:.0f}s) ---')
+"
+```
+Review: `uv run python scripts/review_sample.py "tmp\biomercs-run2\manifest.sqlite" unreviewed`
+(or a number for a random sample, or `wrong`). Always sanity-check the
+clip count after a run -- 0 clips means a wrong path, not a clean video.
+Ground-truth window clip/frames from this session are in
+`tmp\biomercs-verify\` (regenerable with ffmpeg from the source video).
 
 Everything under `/tmp` is gone once a session ends, including all
 downloaded source videos and pipeline-run manifests/clips. To pick back up:

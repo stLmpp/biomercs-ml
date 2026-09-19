@@ -16,6 +16,32 @@ the time) that the other three files don't repeat.
 
 ---
 
+## Status as of 2026-09-19 (an eighth session) — moved to Windows; fresh
+## review round; root-caused and fixed `timer-noise-session-fragmentation`
+## (52 -> 1 sessions in a real window); then discovered the real problem:
+## ~5% kill recall
+
+Full evidence: DECISIONS.md § "2026-09-19 (an eighth session)". Order of
+events: (1) started a manual review round -- first pipeline run silently
+produced 0 clips (bash `/tmp` vs Windows-Python drive-root path mismatch;
+`cv2` returns no frames for a missing file), fixed by using project-
+relative `tmp\` paths; review script made cross-platform. (2) Round 1:
+3/16 correct, video4 8/8 wrong. (3) User watched a continuous 170s video4
+window and gave full ground truth: 49 kills (36 bonus / 13 bullet) vs 8
+detected. (4) Frame forensics: the popup-overlay theory was disproven
+(20%); real cause of garbage timer ticks is background scenery bleeding
+through translucent timer digits. (5) The bigger driver was miscalibrated
+`SESSION_RESET_*` thresholds; with user domain facts (round resets to
+2:00; max jump ~+90/+105) raised them (52 -> 9) then added a
+two-directional spike guard (-> 1). Committed + pushed (`5575ae3`,
+`1119d68`). (6) Re-ran the pipeline: 36 clips (was 16), partial review
+5/17 correct; hit a stale-DB-rows crash (PowerShell has no `rm -rf`),
+cleaned it and added `review_sample.py ... unreviewed`. (7) User pointed
+out ~150 real kills vs ~7 clips/video; measured combo readable in 44% of
+ticks and the `+05` popup matching truth (24 episodes, 0 orphans) --
+agreed to build a recall benchmark, then popup-driven detection. Session
+ended (context length) before starting the benchmark.
+
 ## Status as of 2026-09-18 (a seventh session) — a reverted geometric
 ## tiebreak attempt for `combo-9-vs-8-misread`; then a template-defect
 ## audit (triggered by the user, extended by the user) that removed 4

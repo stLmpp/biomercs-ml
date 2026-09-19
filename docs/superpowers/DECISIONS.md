@@ -2412,3 +2412,201 @@ code** -- deprioritized once the template-defect audit took over as the
 higher-value thread this session. Worth revisiting with the now much
 larger, bleed-free "6" and "0" sample sets if `combo-6-vs-0-tens-misread`
 gets picked up again.
+
+
+## 2026-09-19 (an eighth session) -- fresh review round, root-causing
+## `timer-noise-session-fragmentation`, and discovering the real recall
+## problem (~5% of real kills detected)
+
+**Environment note first:** this session ran on **Windows** (repo at
+`D:\Projects\biomercs-ml`, PowerShell/Git Bash), not the macOS setup the
+older sections assume. Source videos live in the project's own gitignored
+`tmp\biomercs-footage{,2,3,4,5}\source.mp4`; pipeline outputs go in
+`tmp\biomercs-run{,2,3,4,5}\` (clips + `manifest.sqlite`). See
+`windows-path-and-shell-gotchas` in KNOWN_BUGS.md -- two of them silently
+produced a fake "0 clips" result early on.
+
+### Round 1 review (16 clips, all 5 videos, pre-fix code)
+
+Result: **3 correct / 13 incorrect**. Not uniform:
+- video4: **8/8 wrong**, all inside one ~146s window (t=490.7-636.6),
+  two of them the already-tracked `video4-undercount-id2` /
+  `video4-wrong-kind-id5` timestamps.
+- video1/2/3/5 (other 8 clips): 3 correct, 5 wrong -- and all 5 wrong had
+  true `n_bullet=0` (the `fabricated-bullet-count-on-bonus-kill` pattern,
+  same ~93-100% hit rate as before `combo-2-vs-8-misread` was fixed, i.e.
+  that fix didn't visibly reduce it on this sample).
+
+### Ground truth for video4 t=480-650 (user, by watching the clip)
+
+The user watched a continuous 170s clip
+(`tmp\biomercs-verify\video4_window\video4_t480-650.mp4`, cut with
+`ffmpeg -ss 480 -c copy`) and listed every kill as clip-relative
+`mm:ss - count`:
+
+- **bullet (13 kills):** 00:41-1, 01:08-1, 01:11-1, 01:46-1, 01:50-1,
+  02:05-1, 02:17-1, 02:24-1, 02:27-1, 02:38-2, 02:40-1, 02:43-1
+- **bonus (36 kills):** 00:03-1, 00:06~07-2, 00:13~14-3, 00:21-1,
+  00:27~28-2, 00:35-1, 00:36-1, 00:39-1, 00:45~46-2, 00:53-1, 00:59-1,
+  01:01-1, 01:03-1, 01:18-1, 01:26-1, 01:32-1, 01:38-2, 01:54-1, 01:58-1,
+  02:03-2, 02:10-1, 02:15-1, 02:21-1, 02:26-1, 02:36-1, 02:40-1,
+  02:46~47-3
+
+**49 real kills (36 bonus + 13 bullet)** in 170s. Round 1 detected 8 groups
+in that window. The combo counter climbs 102 -> 149 across it.
+
+**Clip-time alignment caveat (matters for any benchmark built from this):**
+`-c copy` snaps to the keyframe at/before 480s (keyframes at 475.71,
+478.81, 481.71 -> clip t=0 is ~478.81s absolute, i.e. -1.19s vs the 480
+assumed), and the user's timestamps were read off a player, likely lagging
+the true event by ~1-2s. Empirically, matching against the pipeline's own
+`+05 sec.` popup episodes, the best shift is **-3s** (29/32 distinct
+truth seconds matched, 0 of 24 popup episodes orphaned; -2s: 26/32, -4s:
+24/32, 0s: only 8/32). So **absolute time ~= 480 + clip_seconds - 3**.
+
+### Frame-level forensics of the garbage timer ticks
+
+The raw per-tick timer in that window is a smooth ~1s/s countdown with
+isolated garbage single-tick values (627, 288, 626, 268, 629, **5364**)
+that each trip `is_new_session`.
+
+- **Hypothesis ruled out: the "+05 sec." popup overlay corrupts the timer
+  digits.** One frame (t=513.7) showed the popup next to the timer, but a
+  direct test of the pipeline's own `is_popup_visible` within +/-0.3s of
+  all 50 garbage ticks found it visible for only **10/50 (20%)** --
+  roughly coincidence-level.
+- **Real mechanism (t=641.8, misread `5364`):** pulling the tick's full
+  11-frame vote burst, frames 0-3 read `568` correctly but frames 4-10
+  (7 of 11) read `5364`/`5368`. `5364` = minutes "89" x 60 + seconds
+  "24": the **tens-of-minutes "0" misread as "8"**. Cropping that exact
+  slot (`TIMER_MINUTES_SLOTS[0]`) shows why: the timer digits are
+  **translucent**, and a diagonal wooden beam in the scene sweeps across
+  the "0" mid-burst, bisecting the loop so it genuinely looks like an
+  "8". The whole frame looks clean to a human. The occlusion lasts
+  several consecutive frames, so the 11-frame majority vote can't save
+  it. Images: `tmp\biomercs-verify\video4_burst_641\` (11 frames +
+  `*_minutes_tens_crop.png`).
+  This reframes `timer-3-vs-8-9-misread`: at least this instance is
+  background-geometry bleed-through, not font-shape ambiguity, so
+  better shape features alone won't fix it.
+
+### The dominant cause of the fragmentation was miscalibrated thresholds
+
+Counting `is_new_session` firings on that window with the old constants
+(`SESSION_RESET_DROP_S=1.0`, `SESSION_RESET_JUMP_S=25.0`): **52**. Only 5
+were spike-and-revert misreads; ~47 were small **sustained** drops
+(-2, -5, -10, -12s) during low-confidence combat stretches (single-frame
+timer confidence 0.2-0.3), i.e. ordinary read noise a 1s tolerance can't
+absorb.
+
+User domain facts that settled the calibration (all "per the author's own
+top-level competitive experience"):
+- A new round **always starts at 2:00 (120s)**, so a real transition is a
+  change of hundreds of seconds (banked bonus time regularly >580s).
+- Max plausible timer *jump*: a map pickup is +30/60/90, kill bonus +5
+  each, so **~+90, or +105 in an "impossibly rare" stack**. (The +30/60/90
+  also shows as a popup beside the timer, like +05.)
+- None of the 5 source videos contain a round transition -- each is one
+  continuous run, so any session split inside them is spurious by
+  definition.
+
+**Fix (commit `5575ae3`, pushed):** `SESSION_RESET_JUMP_S` 25 -> **120**,
+`SESSION_RESET_DROP_S` 1 -> **30** (config-only; 52 -> 9 boundaries in the
+window). The 9 left were the isolated spikes. New
+`hud_reader._is_spurious_timer_spike(prev, curr, next)` +
+`_assign_session_ids` (extracted from `sample_video`) drop a tick's timer
+reading when its neighbors agree with each other but it conflicts with
+either one. **The check must be two-directional:** a first
+prev->curr-only version left 3 boundaries, because a moderate misread
+like 627 (+50) now sits *under* the loosened jump ceiling and goes
+undetected going up, while the correction back to 577 (-50) exceeds the
+30s drop tolerance and fires. Checking `curr->next` too closes that. A
+simple neighbor-corroboration simulation *before* the threshold change
+suppressed only 5/52 -- the threshold fix had to come first.
+Result: **1 session in the window (was 52)**, matching reality.
+126 tests at that commit. Also fixed in the same session
+(commit `1119d68`): `scripts/review_sample.py` no longer hardcodes macOS
+`open`/`osascript` (uses `os.startfile` on Windows).
+
+### Round 2 (post-fix pipeline re-run, PARTIAL review)
+
+Re-running the pipeline produced **36 clips (was 16)** -- the fix
+recovers events that used to vanish with fragmented sessions. 17 of the
+36 were reviewed before the pass was interrupted: **5 correct / 12
+incorrect**; 7 of the 12 wrong have true `n_bullet=0`, 5 have true
+`n_bullet>0` (mostly overcounted/undercounted mixed groups, e.g.
+detected `bonus(4,0)` true `(2,1)`). Low-confidence (0.06-0.25) clips are
+the implausible big groups (`bonus=7`, `bullet=6`). Answers are stored
+in each `tmp\biomercs-runN\manifest.sqlite` (`review_*` columns);
+**runs 2-5 still have unreviewed clips** (run1 fully reviewed).
+**Caveat:** clip filenames still show `session_id`s of 47/49/55/98 -- the
+1-session result is for the 480-650s window only, so **substantial session
+fragmentation remains elsewhere in the videos, unexplained.**
+
+Also fixed a review-flow crash: the manifests held stale rows from the
+previous run (paths under `C:\Users\...\Temp\...` that no longer exist)
+because `rm -rf` was given to a PowerShell user (it doesn't work there)
+and `create_db` never clears rows -- `stale-output-dir-mixes-review-rows`
+biting again. Stale rows were removed (backups:
+`manifest.before-stale-cleanup.sqlite.bak` in each run dir). Added
+`dataset_manifest.fetch_unreviewed` + `review_sample.py ... unreviewed`
+mode (with test) to resume without redoing answered clips.
+**These are uncommitted** (see HANDOFF.md).
+
+### THE BIG FINDING: recall is ~5%, and the cause is structural
+
+The user's framing: a run has **~150 kills**; the pipeline emits ~7
+clips per video. "No minimo 140 tinha que detectar pra comecar a ficar
+bom." Recall is roughly 5%, dwarfing the label-accuracy problems the
+review rounds measure (review only scores clips that exist).
+
+Measured on the 49-kill window:
+- **The combo counter is readable in only 44% of ticks** (378/850,
+  single-frame read): the game hides the combo HUD between kills.
+  `detect_kill_groups` compares *adjacent kept samples* (samples with a
+  readable combo), so a "group" is the combo rise between two visible
+  readings however far apart in time. Real example from the raw ticks:
+  combo 104 @ 497.7s -> 108 @ 503.9s = **4 separate kills 6s apart
+  merged into one group**, one clip, and an invented bullet/bonus split
+  (this is `multi-kill-adjacent-pair-gap-fragility`, previously LATENT,
+  now the dominant cause).
+- **The "+05 sec." popup is a precise per-event bonus signal that the
+  pipeline currently discards** (it only uses the popup's ones-digit to
+  *exclude* map pickups, `pickup_popup = ones_digit == 0`). Using the
+  existing `is_popup_visible` on tick frames over the window: **24
+  episodes**; after the -3s truth alignment, **29/32 distinct
+  bonus-second truth events matched and 0/24 episodes were orphans**.
+  (24 episodes < 32 truth seconds because adjacent kills within ~1s share
+  one popup.)
+- **Important constraint (user reminder): simultaneous multi-kills with
+  bonus show only ONE "+05" popup** (fixed at +05 by the game regardless
+  of count, see the comment above `POPUP_ONES_DIGIT_SLOT` in config.py).
+  So the popup gives *when*, not *how many* -- the count of bonus kills in
+  an episode must come from the timer jump (+5 per kill).
+
+### Agreed direction (user approved; NOT yet implemented)
+
+1. **Build a recall benchmark first**: the 49-kill ground truth above
+   (times shifted -3s) as a fixture, a pure scoring function (kills
+   covered, count accuracy, clip precision) in a small `benchmark.py`
+   with tests, and a script that runs the sampler over the window and
+   scores it (cache the ~2 min raw samples in `tmp\`). Lets us iterate
+   on a number instead of manual review.
+2. **Popup-driven bonus detection**: one event per popup episode
+   (precise time), bonus count from the timer jump, bullet kills from
+   the combo rise over the interval minus bonuses. Combo is only the
+   *secondary* signal because it is sparse.
+3. Keep `is_popup_visible`'s pickup handling (ones digit 0 = +30/60/90,
+   still excluded).
+Open design questions: how to attribute combo rises to bullet kills
+between sparse readings; how to bound a popup episode's kill count;
+whether adjacent-sample grouping should be replaced outright.
+
+### Tooling notes
+- Bash `/tmp` on this machine maps to `C:\Users\guist\AppData\Local\
+  Temp`; a native-Windows Python `Path('/tmp/x')` resolves to
+  `D:\tmp\x` (drive root). Use project-relative `tmp\...` paths.
+- `cv2.VideoCapture` on a missing file returns no frames instead of
+  raising, so `pipeline.run` on a wrong path "succeeds" with 0 clips.
+- Scratch scripts from this session (popup-vs-truth measurement) were in
+  the session scratchpad and are not in the repo.

@@ -83,6 +83,14 @@ straddles the real notch instead of isolating it. Two follow-up variants
 (bbox-relative thirds, peak-recession) also failed. Needs a genuinely
 different approach: stroke-width profiling, Hu-moment contour descriptors,
 or a small trained classifier — none attempted yet.
+**2026-09-19 reframe:** at least the worst instance (video4 t=641.8, tens-
+of-minutes "0" -> "8", value `5364`) is *not* font-shape ambiguity: the
+timer digits are translucent and a background beam sweeps across the "0"
+for several consecutive frames, so the glyph genuinely looks like an "8"
+(defeats the 11-frame vote too). Better shape features won't fix that
+class; its *symptom* (spurious sessions) is now handled by the spike
+guard (see `timer-noise-session-fragmentation`), but the misread itself
+still happens. Images: `tmp\biomercs-verify\video4_burst_641\`.
 - DECISIONS.md § "the waist-notch feature tested against the timer font on
   real footage and found NOT to hold..."
 
@@ -106,6 +114,27 @@ samples); see `combo-template-defects` in FIXED_BUGS.md for that part.
 
 ## Event detection / kill-grouping
 
+### `low-kill-recall` ★★ (biggest problem in the project)
+**OPEN.** A run has **~150 kills**; the pipeline emits ~7 clips/video
+(36 clips across all 5 videos post-session-fix, 16 before) -- roughly 5%
+recall. The user's bar: detect at least ~140 for it to start being good.
+Review rounds only score clips that exist, so they hide this. Ground
+truth for video4 t=480-650s: **49 real kills (36 bonus + 13 bullet)**
+(times/list in DECISIONS.md § 2026-09-19; absolute time ~= 480 + clip
+seconds - 3).
+Measured causes: the combo HUD is readable in only **44%** of ticks (the
+game hides it between kills), and `detect_kill_groups` groups by combo
+rise between *adjacent kept samples*, so kills seconds apart merge into
+one group (e.g. combo 104@497.7s -> 108@503.9s = 4 kills, 1 clip). Meanwhile
+the `+05 sec.` popup -- already computed each tick by `is_popup_visible`,
+but only used to exclude map pickups -- gave 24 episodes with **0 orphans**
+and matched 29/32 truth bonus-seconds. **Constraint:** simultaneous bonus
+multi-kills show only ONE popup, so the count must come from the timer
+jump (+5 each). **Agreed direction (not implemented):** build a recall
+benchmark from the 49-kill truth first, then popup-driven bonus detection
+with combo as the secondary (bullet) signal.
+- DECISIONS.md § "2026-09-19 (an eighth session)" -> "THE BIG FINDING"
+
 ### `fabricated-bullet-count-on-bonus-kill` ★
 **OPEN** (umbrella/symptom). `auto_labeler.label_kill_group` computes
 `n_bullet = group_size - n_bonus` as a pure, never-independently-verified
@@ -116,6 +145,14 @@ past contributors are now fixed (`bug-a-timer-delta-desync`,
 `group-size-overestimation-anchors`, `combo-2-vs-8-misread` in
 FIXED_BUGS.md); needs a fresh review round to confirm whether a smaller
 remaining driver still shows up now that `combo-2-vs-8-misread` is fixed.
+**2026-09-19 fresh rounds:** round 1 (pre-session-fix) 3/16 correct; all 5
+wrong clips outside video4 had true `n_bullet=0` (so `combo-2-vs-8` did
+not visibly help). Round 2 (post-session-fix, partial): 5/17 correct, 7 of
+12 wrong with true `n_bullet=0`, 5 with true `n_bullet>0`. The dominant
+underlying driver is now understood to be `low-kill-recall` (adjacent-
+sample grouping merges kills seconds apart into one group whose bullet
+count is just `group_size - n_bonus`), not a digit misread -- fix that
+first, then re-measure this.
 - DECISIONS.md § "Re-review surfaces a second, distinct bug...", § "the
   timer-cross-check idea investigated..." (23-clip baseline table)
 
@@ -153,7 +190,9 @@ fabricated-bullet-count family.
 - DECISIONS.md § "Manual review of the fix's clips"
 
 ### `multi-kill-adjacent-pair-gap-fragility`
-**LATENT.** `detect_kill_groups` only ever compares *adjacent* samples
+**OPEN, promoted from LATENT 2026-09-19 -- this is the mechanism behind
+`low-kill-recall`** (combo readable only 44% of ticks, so "adjacent" kept
+samples are often seconds apart). Original description: `detect_kill_groups` only ever compares *adjacent* samples
 within a session; any long stretch with zero valid samples between two
 individually-correct reads gets treated as one simultaneous group,
 however many real separate kills happened inside it. The one observed
@@ -165,7 +204,22 @@ never hardened and could resurface under a different gap-inducing cause.
 ## Session / timer noise
 
 ### `timer-noise-session-fragmentation` ★
-**OPEN**, long-running, architectural. Timer readings go to garbage
+**MOSTLY FIXED for the tested window (2026-09-19); residual OPEN.** Real
+cause turned out to be (1) `SESSION_RESET_DROP_S`/`SESSION_RESET_JUMP_S`
+(1s/25s) being far tighter than real read noise and real stacked bonuses
+-> now 30s/120s (a round always restarts at 2:00, so real transitions are
+hundreds of seconds), plus (2) isolated single-tick garbage timer values
+caused by background scenery bleeding through the timer's translucent
+digits (e.g. tens-of-minutes "0" read as "8" -> `5364`) -> now suppressed
+by `hud_reader._is_spurious_timer_spike` (two-directional neighbor check).
+Video4 t=480-650s went from 52 spurious session splits to **1** (truth:
+1). **Residual:** clip filenames from the post-fix run still carry
+`session_id`s of 47/49/55/98, so fragmentation remains elsewhere in the
+videos -- not yet investigated (find where, using the raw-tick method in
+DECISIONS.md § 2026-09-19). Full fix details in FIXED_BUGS.md
+(`timer-session-thresholds-and-spike-guard`).
+
+**Original description (pre-fix):** Timer readings go to garbage
 4-digit values in specific chaotic windows (not just a wrong-but-plausible
 digit). `is_new_session`'s jump/drop detection fires on this noise
 constantly, fragmenting one continuous real sequence into many spurious
@@ -190,6 +244,22 @@ existing output dir within the same session does not clear prior rows
 (`dataset_manifest.create_db` only creates missing directories). Bit the
 project twice. Always `rm -rf` the output dir before re-running.
 - DECISIONS.md § "Re-ran the fixed pipeline, re-reviewed..."
+
+### `windows-path-and-shell-gotchas`
+**ACCEPTED**, operational (the project now runs on Windows; older docs
+assume macOS). (1) Git Bash's `/tmp` is `C:\Users\<u>\AppData\Local\Temp`,
+but a native-Windows Python `Path('/tmp/x')` resolves to `D:\tmp\x` (drive
+root) -- so a script run via `uv run python` silently reads/writes a
+different directory than bash `ls /tmp` shows. Use project-relative
+`tmp\...` paths (the videos live in `tmp\biomercs-footage*\`). (2)
+`cv2.VideoCapture` on a missing file returns no frames instead of raising,
+so `pipeline.run` on a wrong path "succeeds" with 0 clips and an empty
+manifest -- check the clip count. (3) `rm -rf` doesn't work in PowerShell;
+use `Remove-Item -Recurse -Force`. Skipping it re-triggered
+`stale-output-dir-mixes-review-rows` (stale rows with dead paths crashed
+`review_sample.py`; fixed by deleting rows whose file is missing, with
+`.bak` copies; `review_sample.py ... unreviewed` resumes a pass).
+- DECISIONS.md § "2026-09-19 (an eighth session)"
 
 ### `review-redo-does-not-clear-db-value`
 **ACCEPTED.** Using the review script's redo (`r`) option to walk back an

@@ -250,6 +250,26 @@ sample list, not just the current session.
 - DECISIONS.md § "Bug C fixed: transient-dip guard now looks across
   session boundaries"
 
+### `timer-session-thresholds-and-spike-guard` ★ (2026-09-19, commit `5575ae3`)
+`is_new_session`'s `SESSION_RESET_DROP_S=1.0` / `SESSION_RESET_JUMP_S=25.0`
+were far tighter than real footage: ordinary read noise (drops of
+-2..-12s during low-confidence combat) and legitimate stacked bonuses
+(+90 pickup, up to ~+105 with kills) were treated as new-round resets,
+fragmenting one run into dozens of sessions (52 in video4 t=480-650s;
+truth: 1) and starving `detect_kill_groups` of real events.
+**Fix:** `SESSION_RESET_JUMP_S=120`, `SESSION_RESET_DROP_S=30` (a real
+round reset is always to 2:00 = hundreds of seconds of change) -> 52 to 9;
+plus `_is_spurious_timer_spike` / `_assign_session_ids`, which drops a
+tick's timer reading when its neighbors agree with each other but it
+conflicts with *either* one (must be two-directional: a moderate misread
+like 627 slips under the loosened jump ceiling and only its correction
+back down trips the drop threshold) -> **1 session**, matching truth.
+**Residual:** a tick-level misread still happens (translucent digits +
+background geometry); only its session-splitting symptom is handled. And
+non-window parts of the videos still show high session ids (see
+`timer-noise-session-fragmentation` in KNOWN_BUGS.md).
+- DECISIONS.md § "2026-09-19 (an eighth session)"
+
 ### `bug-d-vote-burst-too-narrow`
 Rapid frame-to-frame flicker (combo bouncing among 5+ values every frame)
 was too fast/noisy for the original 3-frame majority vote — the true
