@@ -434,13 +434,17 @@ def _sample_range(
             [is_popup_visible(f, popup_label_template, offset) for f in burst_frames]
         )
         pickup_popup = False
+        bonus_popup = False
         if popup_visible:
             ones_digit, _ = _majority_value(
                 [read_popup_ones_digit(f, popup_digit_templates) for f in burst_frames]
             )
             pickup_popup = ones_digit == 0
+            bonus_popup = not pickup_popup
 
-        results.append(RawHudSample(timestamp_s, timer_value, combo_value, confidence, pickup_popup))
+        results.append(
+            RawHudSample(timestamp_s, timer_value, combo_value, confidence, pickup_popup, bonus_popup)
+        )
     cap.release()
 
     return results
@@ -543,7 +547,7 @@ def _assign_session_ids(raw_samples: list[RawHudSample]) -> list[HudSample]:
         samples.append(
             HudSample(
                 raw.timestamp_s, session_id, timer_value, raw.combo_value,
-                raw.confidence, raw.pickup_popup,
+                raw.confidence, raw.pickup_popup, raw.bonus_popup,
             )
         )
 

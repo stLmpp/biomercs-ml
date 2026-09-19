@@ -12,6 +12,7 @@ class HudSample:
     combo_value: int | None
     confidence: float
     pickup_popup: bool = False
+    bonus_popup: bool = False
 
 
 @dataclass
@@ -21,6 +22,7 @@ class RawHudSample:
     combo_value: int | None
     confidence: float
     pickup_popup: bool = False
+    bonus_popup: bool = False
 
 
 @dataclass

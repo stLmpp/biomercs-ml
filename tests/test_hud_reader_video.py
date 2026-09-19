@@ -301,6 +301,45 @@ def test_sample_video_does_not_flag_the_fixed_kill_bonus_popup():
         assert sample.pickup_popup is False
 
 
+def _sample_with_popup(popup_visible: bool, ones_digit: int | None):
+    timer_templates = hud_reader.load_digit_templates(config.TIMER_DIGITS_DIR)
+    combo_templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
+    combo_label_template = hud_reader.load_image(config.COMBO_LABEL_TEMPLATE_PATH)
+    popup_digit_templates = hud_reader.load_digit_templates(config.POPUP_DIGITS_DIR)
+    popup_label_template = hud_reader.load_image(config.POPUP_LABEL_TEMPLATE_PATH)
+
+    with (
+        patch("biomercs_ml.hud_reader.is_valid_hud_frame", return_value=(True, 1.0)),
+        patch("biomercs_ml.hud_reader.read_timer", return_value=(148.0, 0.9)),
+        patch("biomercs_ml.hud_reader.read_combo", return_value=(3, 0.9)),
+        patch("biomercs_ml.hud_reader.is_popup_visible", return_value=(popup_visible, 1.0)),
+        patch("biomercs_ml.hud_reader.read_popup_ones_digit", return_value=(ones_digit, 0.9)),
+    ):
+        samples = hud_reader.sample_video(
+            Path(VIDEO_PATH),
+            timer_templates,
+            combo_templates,
+            combo_label_template,
+            popup_digit_templates,
+            popup_label_template,
+            max_workers=1,
+        )
+    assert samples
+    return samples
+
+
+def test_sample_video_flags_bonus_popup_when_popup_shows_a_non_zero_ones_digit():
+    assert all(s.bonus_popup is True for s in _sample_with_popup(True, 5))
+
+
+def test_sample_video_does_not_flag_bonus_popup_for_a_map_pickup_popup():
+    assert all(s.bonus_popup is False for s in _sample_with_popup(True, 0))
+
+
+def test_sample_video_does_not_flag_bonus_popup_when_no_popup_is_visible():
+    assert all(s.bonus_popup is False for s in _sample_with_popup(False, None))
+
+
 def test_sample_range_chunking_produces_same_raw_samples_as_one_full_range():
     # #6 (parallelization) splits sample_video's work into chunks aligned
     # to tick multiples so no chunk ever needs a frame from a neighboring
