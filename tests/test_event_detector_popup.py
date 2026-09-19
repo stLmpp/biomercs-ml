@@ -192,3 +192,14 @@ def test_popups_closer_than_the_timer_lead_merge_into_one_group_counting_both_ju
     groups = event_detector.detect_popup_kill_groups(samples, session_id=0)
 
     assert [(g.timestamp_s, g.group_size) for g in groups] == [(3.0, 2)]
+
+
+def test_popup_episode_with_an_implausibly_large_timer_jump_is_dropped():
+    # A jump worth more kills than can ever happen at once is a map pickup
+    # or a timer misread, not a kill bonus.
+    samples = _ticks(6.0, popup_ranges=((3.0, 3.4),))
+    for sample in samples:
+        if sample.timestamp_s >= 3.0:
+            sample.timer_value_s += 5.0 * (config.MAX_PLAUSIBLE_GROUP_SIZE + 1)
+
+    assert event_detector.detect_popup_kill_groups(samples, session_id=0) == []

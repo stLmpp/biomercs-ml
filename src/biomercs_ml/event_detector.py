@@ -249,7 +249,7 @@ def _bonus_episode_group(
     # A simultaneous multi-kill shows a single popup, so the kill count
     # can only come from the timer jump (+5s each).
     n_bonus = round((timer_after_s - timer_before_s + elapsed_s) / 5.0)
-    if n_bonus < 1:
+    if not (1 <= n_bonus <= config.MAX_PLAUSIBLE_GROUP_SIZE):
         return None
     return KillGroup(
         session_id=session_id,
