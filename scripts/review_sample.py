@@ -1,11 +1,13 @@
 """Pull clips for manual review.
 
-Usage: uv run python scripts/review_sample.py <db_path> [n|wrong]
+Usage: uv run python scripts/review_sample.py <db_path> [n|wrong|unreviewed]
 
 A number pulls a random sample of that size. "wrong" instead re-reviews
 every clip already marked incorrect in a prior pass -- useful for going
 back with a correction (see parse_review_answer) once a first pass has
-already flagged which ones are wrong.
+already flagged which ones are wrong. "unreviewed" pulls only clips with
+no answer recorded yet, in timestamp order -- for resuming an
+interrupted pass without redoing clips already answered.
 """
 import os
 import subprocess
@@ -47,6 +49,8 @@ def main() -> None:
     dataset_manifest.create_db(db_path)  # no-op on an existing, up-to-date db
     if mode == "wrong":
         rows = dataset_manifest.fetch_reviewed_incorrect(db_path)
+    elif mode == "unreviewed":
+        rows = dataset_manifest.fetch_unreviewed(db_path)
     else:
         rows = dataset_manifest.fetch_random_sample(db_path, int(mode))
     print(f"Reviewing {len(rows)} clips. Each will open in your default player;")

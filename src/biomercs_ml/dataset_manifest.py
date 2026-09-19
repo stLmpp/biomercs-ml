@@ -90,6 +90,17 @@ def fetch_random_sample(db_path: Path, n: int) -> list[tuple]:
         conn.close()
 
 
+def fetch_unreviewed(db_path: Path) -> list[tuple]:
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT * FROM clips WHERE review_correct IS NULL ORDER BY event_timestamp_s"
+        )
+        return cursor.fetchall()
+    finally:
+        conn.close()
+
+
 def fetch_reviewed_incorrect(db_path: Path) -> list[tuple]:
     conn = sqlite3.connect(db_path)
     try:

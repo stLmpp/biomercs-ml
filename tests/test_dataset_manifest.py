@@ -129,3 +129,17 @@ def test_fetch_reviewed_incorrect_returns_only_clips_marked_wrong(tmp_path):
     rows = dataset_manifest.fetch_reviewed_incorrect(db_path)
 
     assert [row[0] for row in rows] == [wrong_id]
+
+
+def test_fetch_unreviewed_returns_only_clips_with_no_review_yet(tmp_path):
+    db_path = tmp_path / "manifest.sqlite"
+    dataset_manifest.create_db(db_path)
+    correct_id = dataset_manifest.insert_clip(db_path, _record(clip_path="correct.mp4"))
+    wrong_id = dataset_manifest.insert_clip(db_path, _record(clip_path="wrong.mp4"))
+    unreviewed_id = dataset_manifest.insert_clip(db_path, _record(clip_path="unreviewed.mp4"))
+    dataset_manifest.record_review(db_path, correct_id, correct=True)
+    dataset_manifest.record_review(db_path, wrong_id, correct=False)
+
+    rows = dataset_manifest.fetch_unreviewed(db_path)
+
+    assert [row[0] for row in rows] == [unreviewed_id]
