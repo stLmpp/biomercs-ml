@@ -1,5 +1,4 @@
 import math
-from dataclasses import replace
 from statistics import median
 
 from biomercs_ml import config
@@ -219,7 +218,7 @@ def _bonus_episode_group(
     session_id: int,
     previous_end_s: float,
     next_start_s: float,
-) -> tuple[KillGroup, int] | None:
+) -> KillGroup | None:
     start_s = episode[0].timestamp_s
     end_s = episode[-1].timestamp_s
     if _pickup_nearby(all_samples, start_s) or _pickup_nearby(all_samples, end_s):
@@ -247,7 +246,7 @@ def _bonus_episode_group(
     n_bonus = round((timer_after_s - timer_before_s + elapsed_s) / 5.0)
     if n_bonus < 1:
         return None
-    group = KillGroup(
+    return KillGroup(
         session_id=session_id,
         timestamp_s=start_s,
         group_size=n_bonus,
@@ -256,7 +255,6 @@ def _bonus_episode_group(
         elapsed_s=elapsed_s,
         confidence=min(before[-1].confidence, after[-1].confidence),
     )
-    return group, n_bonus
 
 
 def detect_popup_kill_groups(
@@ -274,8 +272,10 @@ def detect_popup_kill_groups(
         if (bonus := _bonus_episode_group(episode, search_samples, session_id, previous_end_s, next_start_s))
         is not None
     ]
-    # The combo is sparse (unreadable much of the time), so it is only the
-    # secondary signal: it explains whatever kills the popups did not.
+    # A combo-rise pair with no popup near it is kept as its own group
+    # (pure bullet kills, or a bonus whose popup was never seen). One that
+    # has popups near it is fully explained by them: the combo is too
+    # sparse to also say how many extra bullet kills hide in the pair.
     combo_groups = detect_kill_groups(
         _combo_readable(session_samples), session_id, all_samples=_combo_readable(search_samples)
     )
@@ -285,15 +285,11 @@ def detect_popup_kill_groups(
     for combo_group in combo_groups:
         window_start_s = combo_group.timestamp_s - combo_group.elapsed_s - config.TIMER_DELTA_SEARCH_WINDOW_S
         window_end_s = combo_group.timestamp_s + config.POPUP_COMBO_ATTACH_LAG_S
-        attached = [b for b in unattached if window_start_s <= b[0].timestamp_s <= window_end_s]
+        attached = [b for b in unattached if window_start_s <= b.timestamp_s <= window_end_s]
         if not attached:
             groups.append(combo_group)
             continue
         unattached = [b for b in unattached if b not in attached]
-        residual_bullets = combo_group.group_size - sum(n_bonus for _, n_bonus in attached)
-        if residual_bullets > 0:
-            last_group, last_n_bonus = attached[-1]
-            attached[-1] = (replace(last_group, group_size=last_n_bonus + residual_bullets), last_n_bonus)
-        groups.extend(group for group, _ in attached)
-    groups.extend(group for group, _ in unattached)
+        groups.extend(attached)
+    groups.extend(unattached)
     return sorted(groups, key=lambda g: g.timestamp_s)

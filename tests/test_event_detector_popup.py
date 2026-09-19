@@ -80,14 +80,18 @@ def test_popup_episode_whose_timer_never_jumped_is_dropped():
     assert event_detector.detect_popup_kill_groups(samples, session_id=0) == []
 
 
-def test_combo_rise_beyond_the_popup_bonuses_is_added_as_bullet_kills_on_the_popup_group():
+def test_combo_rise_beyond_the_popup_bonuses_is_not_turned_into_invented_bullet_kills():
+    # A combo pair's boundaries don't line up with popup episodes (one
+    # popup can already be claimed by the neighboring pair), so the "extra"
+    # rise is unreliable evidence of a bullet kill -- see DECISIONS.md,
+    # ninth session. The popup's own count stands alone.
     samples = _ticks(
         6.0, timer_jumps_s=(3.0,), popup_ranges=((3.0, 3.4),), combo_at={0.0: 10, 4.0: 12}
     )
 
     groups = event_detector.detect_popup_kill_groups(samples, session_id=0)
 
-    assert [(g.timestamp_s, g.group_size) for g in groups] == [(3.0, 2)]
+    assert [(g.timestamp_s, g.group_size) for g in groups] == [(3.0, 1)]
 
 
 def test_combo_rise_fully_explained_by_the_popup_adds_no_extra_group():
