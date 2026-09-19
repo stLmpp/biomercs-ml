@@ -199,6 +199,12 @@ POPUP_TIMER_WINDOW_S = 4.0
 # fire a tick or two after the combo tick that already shows the kill.
 POPUP_COMBO_ATTACH_LAG_S = 1.0
 
+# Confidence multiplier for a combo-rise group whose timer jumped (a bonus)
+# with no popup anywhere near: either the popup was missed or another
+# episode's bonus leaked into the pair's timer window. Kept for recall
+# (dropping them cost ~14 points on the benchmark) but flagged.
+UNCORROBORATED_BONUS_CONFIDENCE_FACTOR = 0.5
+
 # The combo counter only ever increases during a session (it can drop
 # to near zero on a rare genuine combo break, but never dips by a small
 # amount and then climbs back to exactly where it was). A rise that

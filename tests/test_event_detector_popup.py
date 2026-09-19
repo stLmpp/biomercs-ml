@@ -119,12 +119,25 @@ def test_two_popups_inside_one_sparse_combo_pair_stay_two_separate_groups():
     assert [(g.timestamp_s, g.group_size) for g in groups] == [(3.0, 1), (7.0, 1)]
 
 
-def test_combo_rise_without_any_popup_falls_back_to_the_combo_pair_group():
+def test_combo_rise_without_a_popup_or_timer_jump_falls_back_to_a_bullet_kill_group():
+    samples = _ticks(6.0, combo_at={0.0: 10, 4.0: 11})
+
+    groups = event_detector.detect_popup_kill_groups(samples, session_id=0)
+
+    assert [(g.timestamp_s, g.group_size) for g in groups] == [(4.0, 1)]
+
+
+def test_combo_rise_with_a_timer_jump_but_no_popup_nearby_is_kept_with_discounted_confidence():
+    # Every bonus kill shows a popup, so a jump with none near it is either
+    # a bonus whose popup wasn't seen or another episode's bonus leaking
+    # into this pair's timer window -- can't tell which, so keep it (recall
+    # is the bottleneck) but flag it as less trustworthy.
     samples = _ticks(6.0, timer_jumps_s=(3.0,), combo_at={0.0: 10, 4.0: 11})
 
     groups = event_detector.detect_popup_kill_groups(samples, session_id=0)
 
     assert [(g.timestamp_s, g.group_size) for g in groups] == [(4.0, 1)]
+    assert groups[0].confidence == pytest.approx(0.9 * config.UNCORROBORATED_BONUS_CONFIDENCE_FACTOR)
 
 
 def test_one_misread_timer_tick_before_the_popup_does_not_inflate_the_bonus_count():

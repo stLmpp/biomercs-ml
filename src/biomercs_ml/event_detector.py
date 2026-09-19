@@ -1,4 +1,5 @@
 import math
+from dataclasses import replace
 from statistics import median
 
 from biomercs_ml import config
@@ -200,6 +201,10 @@ def _combo_readable(samples: list[HudSample]) -> list[HudSample]:
     return [s for s in samples if s.timer_value_s is not None and s.combo_value is not None]
 
 
+def _timer_shows_no_bonus(group: KillGroup) -> bool:
+    return group.timer_after_s - group.timer_before_s + group.elapsed_s < 5.0 / 2
+
+
 def _bonus_popup_episodes(samples: list[HudSample]) -> list[list[HudSample]]:
     episodes: list[list[HudSample]] = []
     for sample in samples:
@@ -272,10 +277,10 @@ def detect_popup_kill_groups(
         if (bonus := _bonus_episode_group(episode, search_samples, session_id, previous_end_s, next_start_s))
         is not None
     ]
-    # A combo-rise pair with no popup near it is kept as its own group
-    # (pure bullet kills, or a bonus whose popup was never seen). One that
-    # has popups near it is fully explained by them: the combo is too
-    # sparse to also say how many extra bullet kills hide in the pair.
+    # A combo-rise pair with no popup near it and no timer jump is kept as
+    # its own group (bullet kills). One that has popups near it is fully
+    # explained by them: the combo is too sparse to also say how many
+    # extra bullet kills hide in the pair.
     combo_groups = detect_kill_groups(
         _combo_readable(session_samples), session_id, all_samples=_combo_readable(search_samples)
     )
@@ -287,6 +292,13 @@ def detect_popup_kill_groups(
         window_end_s = combo_group.timestamp_s + config.POPUP_COMBO_ATTACH_LAG_S
         attached = [b for b in unattached if window_start_s <= b.timestamp_s <= window_end_s]
         if not attached:
+            # Every bonus kill shows a popup, so a timer jump with none
+            # near this pair is unreliable evidence (see config).
+            if not _timer_shows_no_bonus(combo_group):
+                combo_group = replace(
+                    combo_group,
+                    confidence=combo_group.confidence * config.UNCORROBORATED_BONUS_CONFIDENCE_FACTOR,
+                )
             groups.append(combo_group)
             continue
         unattached = [b for b in unattached if b not in attached]
