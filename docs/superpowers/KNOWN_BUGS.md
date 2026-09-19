@@ -115,6 +115,11 @@ samples); see `combo-template-defects` in FIXED_BUGS.md for that part.
 ## Event detection / kill-grouping
 
 ### `low-kill-recall` ★★ (biggest problem in the project)
+> **Ninth session, user decision:** the popup-driven fix is the LAST
+> OCR/template attempt. If it fails the benchmark/A-B, abandon HUD-OCR and
+> go to the user's original plan (real ML with reinforcement + the user's
+> manual review). See DECISIONS.md § 2026-09-19 (a ninth session).
+
 **OPEN.** A run has **~150 kills**; the pipeline emits ~7 clips/video
 (36 clips across all 5 videos post-session-fix, 16 before) -- roughly 5%
 recall. The user's bar: detect at least ~140 for it to start being good.

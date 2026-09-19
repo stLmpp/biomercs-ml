@@ -66,6 +66,14 @@ must come from the timer jump (+5 each).
 **Ground truth:** 49 kills in video4 t=480-650s (list + the -3s time
 alignment rule in DECISIONS.md § 2026-09-19).
 
+**STRATEGIC DECISION (user, explicit, ninth session): popup-driven
+detection is our LAST OCR/template attempt.** If it does not reach usable
+recall on the benchmark + real-footage A/B, we STOP HUD/OCR work and return
+to the user's original plan: a real ML model trained with reinforcement and
+the user's own manual review as the signal. Don't start another round of
+OCR heuristics/threshold tuning after this one -- escalate to the user. See
+DECISIONS.md § "2026-09-19 (a ninth session)".
+
 **Ninth session -- steps 1-2 below are DONE.** The recall benchmark exists:
 `benchmarks/video4_t480-650.json` (49-kill ground truth),
 `src/biomercs_ml/benchmark.py` (pure `score_detections`),

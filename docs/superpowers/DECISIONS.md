@@ -2610,3 +2610,62 @@ whether adjacent-sample grouping should be replaced outright.
   raising, so `pipeline.run` on a wrong path "succeeds" with 0 clips.
 - Scratch scripts from this session (popup-vs-truth measurement) were in
   the session scratchpad and are not in the repo.
+
+## 2026-09-19 (a ninth session) -- recall benchmark built; popup-driven
+## detection is the LAST template/OCR attempt
+
+### Strategic decision (user, explicit): this is the last HUD/OCR attempt
+
+The user's words: *"Essa é nossa ultima tentativa de OCR, se não der certo
+vamos voltar pro meu plano original: ML de verdade com reinforcement e
+review minha."* The popup-driven detection below is the **final
+rule/template-based (OCR-style) attempt** at getting recall to the user's
+bar (>= ~140 of ~150 kills). If it does not get there -- judged on the
+recall benchmark and a real-footage A/B -- **stop iterating on HUD
+template matching** and return to the user's original plan: a real ML
+model trained with reinforcement (learning-from-feedback) using the user's
+own manual review as the reward/label signal. Do not start another round of
+threshold tuning or new OCR heuristics after this one fails; escalate to
+the user instead. (Scope reminder from HANDOFF.md still holds: stay on the
+data pipeline.)
+
+What counts as "did not work": the benchmark (`scripts/benchmark_recall.py`)
+and the A/B on all five videos not reaching a recall/count-accuracy the user
+considers usable for a training dataset. The user, not the agent, makes the
+call.
+
+### Recall benchmark (built, TDD'd, 140 tests)
+
+`benchmarks/video4_t480-650.json` (49-kill ground truth, abs time =
+`clip_start_s + clip_time_s + alignment_shift_s`, shift -3s),
+`src/biomercs_ml/benchmark.py` (`score_detections`: recall weighted by kill
+count, clip precision, count accuracy on clips that hit a real kill; a clip
+covers a kill if it falls in its +-`CLIP_BEFORE_S`/`CLIP_AFTER_S` window),
+`pipeline.label_kill_groups` (extracted from `pipeline.run` so benchmark and
+production share one path), `scripts/benchmark_recall.py` (raw samples
+cached in `tmp\benchmark\`, `--refresh` after touching `hud_reader`).
+
+**Baseline before any detection change: recall 17/49 (34.7%), precision
+9/9 (100%), count accuracy 0/9 (0%).** Recall is generous (merged clips still
+cover neighbours); count accuracy is the honest failure signal. Sanity check
+matched the diagnosis, e.g. t=503.9 merges 4 kills 6s apart into one clip
+labeled `(2b,2bl)` vs 2 real bonuses.
+
+### Design approved by the user ("Pode seguir")
+
+1. `RawHudSample`/`HudSample` gain `bonus_popup` (popup visible and ones
+   digit != 0); `pickup_popup` unchanged.
+2. One bonus event per popup episode (run of `bonus_popup` ticks, tolerating
+   a 1-tick gap), timestamped at the episode start; bonus count from the
+   timer jump `round((timer_after - timer_before + elapsed) / 5)`, min 1
+   (simultaneous multi-kills show one popup, so count can't come from it).
+3. Bullet events from combo rise between adjacent readings minus the bonus
+   kills of episodes in that interval; event only if a residual remains;
+   `mixed` if a bonus episode shares the interval. Bullet timing stays
+   coarse (no popup; combo is sparse).
+4. Lives in `event_detector`; `auto_labeler` still labels;
+   `pipeline.label_kill_groups` switches over so the benchmark follows.
+
+Expected ceiling from popup alone ~73% recall (36/49 kills are bonus);
+bullets (13/49) are the hard part. Acceptance: benchmark first, then A/B on
+real footage across all 5 videos before keeping the change.
