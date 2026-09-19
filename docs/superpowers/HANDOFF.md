@@ -66,15 +66,22 @@ must come from the timer jump (+5 each).
 **Ground truth:** 49 kills in video4 t=480-650s (list + the -3s time
 alignment rule in DECISIONS.md § 2026-09-19).
 
-**Start here next session (agreed with the user, nothing started yet):**
-1. `git status`, run `uv run pytest`, commit the pending work.
-2. Build the **recall benchmark**: ground-truth fixture from the 49-kill
-   list (abs time ~= 480 + clip_seconds - 3), a pure scoring function
-   (kills covered / count accuracy / clip precision) in a small
-   `benchmark.py` with tests (TDD), and a script that runs
-   `_sample_range` -> `_assign_session_ids` -> `detect_kill_groups` ->
-   `label_kill_group` over the window and scores it (cache the ~2 min raw
-   samples under `tmp\`). Get the baseline number before changing anything.
+**Ninth session -- steps 1-2 below are DONE.** The recall benchmark exists:
+`benchmarks/video4_t480-650.json` (49-kill ground truth),
+`src/biomercs_ml/benchmark.py` (pure `score_detections`),
+`pipeline.label_kill_groups` (shared with `pipeline.run`), and
+`uv run python scripts/benchmark_recall.py [--refresh]` (raw samples cached
+in `tmp\benchmark\`; ~2 min uncached, `--refresh` after touching
+`hud_reader`). **Baseline before any detection change: recall 17/49 kills
+(34.7%), precision 9/9 clips (100%), count accuracy 0/9 (0%)**, 416
+samples, 1 session. A clip "covers" a kill if the kill falls in its
++-2s window (`CLIP_BEFORE_S`/`CLIP_AFTER_S`); recall is weighted by kill
+count. Note recall 34.7% is *generous* (merged multi-kill clips still
+cover neighbours) -- count accuracy is the honest failure signal.
+
+**Start here next session:**
+1. (done) `git status`, `uv run pytest`, commit pending work.
+2. (done) Build the recall benchmark and get the baseline.
 3. Then **popup-driven bonus detection** (one event per popup episode,
    bonus count from timer jump, bullet from combo rise minus bonuses).
    Short in-chat design + explicit user approval before implementing.
