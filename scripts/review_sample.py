@@ -7,6 +7,7 @@ every clip already marked incorrect in a prior pass -- useful for going
 back with a correction (see parse_review_answer) once a first pass has
 already flagged which ones are wrong.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,7 +22,18 @@ COLUMNS = [
 ]
 
 
+def _open_clip(clip_path: str) -> None:
+    if sys.platform == "win32":
+        os.startfile(clip_path)  # noqa: S606 -- local trusted clip path, not user input
+    elif sys.platform == "darwin":
+        subprocess.run(["open", clip_path])
+    else:
+        subprocess.run(["xdg-open", clip_path])
+
+
 def _close_player() -> None:
+    if sys.platform != "darwin":
+        return  # no scriptable "close every document" equivalent on Windows/Linux players
     subprocess.run(
         ["osascript", "-e", 'tell application "QuickTime Player" to close every document'],
         capture_output=True,
@@ -47,7 +59,7 @@ def main() -> None:
         print(f"id={record['id']} label={record['label_kind']} "
               f"(bonus={record['n_bonus']}, bullet={record['n_bullet']}) "
               f"confidence={record['confidence']:.2f} clip={record['clip_path']}")
-        subprocess.run(["open", record["clip_path"]])
+        _open_clip(record["clip_path"])
         answer = input(
             "Correct? (y/n, or <bonus>/<bullet> e.g. 1/2 for the true counts, "
             "r to redo previous, Enter to skip): "
