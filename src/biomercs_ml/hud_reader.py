@@ -404,7 +404,11 @@ def _sample_range(
                 print(f"sample_video: {percent}% ({timestamp_s:.1f}s/{duration_s:.1f}s), {len(results)} samples so far")
                 last_logged_percent = percent
         is_valid, hud_conf = is_valid_hud_frame(frame, combo_label_template, offset)
-        if not is_valid:
+        # The combo HUD hides between kills while a "+05 sec." popup (and
+        # the timer) can still be on screen; the popup label is as good a
+        # proof of live gameplay HUD as the combo label is.
+        popup_only, _ = is_popup_visible(frame, popup_label_template, offset) if not is_valid else (False, 0.0)
+        if not is_valid and not popup_only:
             continue
 
         # The calibrated offset is derived from (and only applied to) the
@@ -422,10 +426,12 @@ def _sample_range(
         timer_value, timer_conf = _majority_value(
             [read_timer(f, timer_templates) for f in burst_frames]
         )
-        combo_value, combo_conf = _majority_value(
-            [read_combo(f, combo_templates) for f in burst_frames]
+        combo_value, combo_conf = (
+            _majority_value([read_combo(f, combo_templates) for f in burst_frames])
+            if is_valid
+            else (None, 0.0)
         )
-        confidence = min(hud_conf, timer_conf, combo_conf)
+        confidence = min(hud_conf, timer_conf, combo_conf) if is_valid else timer_conf
 
         # Popup presence uses the calibrated offset like the combo-label
         # validity check above; the ones digit, like the timer/combo
