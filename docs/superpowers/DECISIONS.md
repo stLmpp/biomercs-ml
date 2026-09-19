@@ -2129,3 +2129,286 @@ fabricated-bullet-count pattern remains the single biggest unsolved
 lever on accuracy project-wide (see the "23-clip statistical baseline"
 entry above) -- this session added a data point to it but did not
 investigate it further.
+
+## 2026-09-18 (a seventh session) -- a third geometric tie-breaker
+## explored for `combo-9-vs-8-misread` (the user's own idea: use "9"'s
+## own concavity, not "8"'s); looked clean against every template and
+## the one available real crop, but REVERTED after the user supplied
+## the actual source videos and a full real-footage A/B diff found it
+## doesn't discriminate a real "9" at all under real conditions
+
+**The user's suggestion:** rather than another axis on "8"'s shape
+(waist-notch for "3", base-widen for "2"), use "9"'s own defining
+concavity directly -- its tail never reconnects into a second closed
+loop the way "8"'s bottom loop does.
+
+**Probed with `cv2.findContours(binary, RETR_CCOMP, ...)`** (2-level
+hierarchy: outer glyph contours vs. the holes they enclose) on every
+combo-font `8`/`9` template, summing enclosed-hole area that falls in
+the bottom half of the glyph's own ink bounding box (border-bleed rows
+excluded the same way `base_widen_score` does), normalized by the
+glyph's total ink area:
+- Templates: `8/a` 0.0649, `8/b` 0.0650 vs. `9/a` 0.0, `9/b` 0.0.
+- `tests/fixtures/digits/combo_8_real.png` (already in the repo): 0.0651.
+- A new real "9" crop, recovered the same way as the "3"/"8" fixtures --
+  extracted the ones-digit slot from `combo_ones_digit_real_9_frame.png`
+  (video1, t=158.0s, reads `039`) through `read_digit_slots`' actual
+  margin-padded crop, then the best-aligned 34x46 sub-window within it
+  (`cv2.matchTemplate` argmax location) to get a precisely-aligned tight
+  crop -- score 0.0201 (tight) / 0.0125 (through the full margin-padded
+  crop). Saved as `tests/fixtures/digits/combo_9_real.png`.
+- Clean, consistent gap in both crop styles: "9" 0.0-0.020, "8"
+  0.0649-0.0651. `config.NINE_BOTTOM_LOOP_THRESHOLD = 0.04` sits at the
+  midpoint.
+
+**Implemented as `hud_reader.bottom_loop_closure_score`, a third opt-in
+tiebreak in `match_digit(..., apply_waist_notch_tiebreak=True)`**,
+alongside `waist_notch_score` and `base_widen_score` -- only fires when
+the raw winner is "8" and "9" is a candidate (the observed real misreads
+in `combo-9-vs-8-misread` only ever go 9-read-as-8, never the reverse,
+so the check is one-directional, unlike the symmetric `("8", "9")` guard
+the other two use). TDD'd: `tests/test_hud_reader_bottom_loop.py`, 4 new
+tests (121 total, was 117) -- full suite green.
+
+**The user then downloaded all five source videos** (`yt-dlp -f 298`,
+same as every prior fix in this project) into a local working dir, so
+the real A/B verification this project always requires became possible.
+
+**t=473.0 itself no longer reproduces at all** -- checked first, before
+the broader diff: current `main` (waist-notch + base-widen, no new
+tiebreak) already reads video1 t=473.0 as `119` at confidence 0.867. The
+`119`->`118` regression cited in this bug was against an earlier,
+since-reverted template set (the "properly re-curated real-footage
+samples for both `8` and `9`" attempt further above), not the current
+`9/a`+`9/b` templates. So this specific historical instance wasn't
+available as a live regression test any more.
+
+**Ran a full `hud_reader.sample_video` A/B on video1 instead** (stash
+the new tiebreak, run, restore, run again, diff every raw combo tick --
+same methodology as the `2`-vs-`8` fix's 5-video diff, scoped to one
+video since only video1 was needed to answer the question): 48 of 489
+overlapping ticks changed, all but two of them a single digit flipping
+`8`->`9`, exactly the targeted shape. **Spot-checked 5 of these changes
+against the actual video frames (not just template scores) and every
+single one was wrong:**
+- t=42.0 (`085`->`095`): the tens digit is a real, clean, unambiguous
+  `0` (visually confirmed, frame 2528) -- raw matching already
+  mismatched it as `8` before this session's change (0.885 vs `0`'s own
+  0.656, a previously-undiscovered `0`-vs-`8` confusion); the new
+  tiebreak just relabels that wrong `8` as an equally wrong `9`.
+- t=521.4 and t=63.8 (`_38`->`_39` twice): both real ones-digits are `2`
+  (visually confirmed `132` and `012` respectively) -- the t=63.8 case
+  is literally the already-documented `012` phantom window from the
+  waist-notch entry above (ground truth never leaves `012` here); this
+  is `combo-2-vs-8-misread` failing to catch it (`base_widen_score`
+  apparently doesn't clear its threshold under this frame's motion
+  blur), not a `9` at all.
+- t=180.6 and t=557.0 (`_48`->`_49` twice): both real ones-digits are
+  `3` (visually confirmed `043` and `143`) -- `combo-3-vs-8-9-misread`
+  failing to catch it (`waist_notch_score` not clearing its threshold
+  under dark lighting), not a `9` either. (t=180.6's hundreds digit is
+  *also* independently wrong, `0` misread as `1` -- that frame's raw
+  matching is broken on more than one axis, unrelated to this session's
+  work.)
+
+**Root cause of the false positives:** `bottom_loop_closure_score`
+doesn't actually detect "9-shaped tail" -- it detects "the bottom-half
+hole is small or absent," which real dark/motion-blurred footage
+produces for *any* digit's closed loop, not just 9's genuinely-open
+one (Otsu thresholding under poor lighting/blur erodes or fully closes
+off small holes indiscriminately). The clean separation measured
+against templates and the one available real crop reflects that those
+were all well-lit, unblurred samples -- not the conditions under which
+`combo-9-vs-8-misread` actually happens in practice (this project has
+repeatedly found the same lesson for the `3`/`2` tiebreaks' own
+thresholds not always clearing under bad footage; the new failure mode
+here is a tiebreak *catching a digit it wasn't designed to disambiguate
+at all*, which the other two don't do because their axes -- left-side
+notch position, right-side base flare -- don't coincide with a generic
+"low-quality crop" signal the way an enclosed-area measurement does).
+
+**Reverted:** `hud_reader.bottom_loop_closure_score`,
+`config.NINE_BOTTOM_LOOP_THRESHOLD`, the `match_digit` tiebreak branch,
+`tests/test_hud_reader_bottom_loop.py`, and
+`tests/fixtures/digits/combo_9_real.png` -- back to the same
+waist-notch + base-widen state as the end of the sixth session. Full
+suite back to 117 (was 121 with the reverted tests). `combo-9-vs-8-misread`
+returned to OPEN in `KNOWN_BUGS.md`. Per this project's own standing
+rule (see `frame-math-vs-watching-clip-discrepancy`), template/crop
+scores are not a substitute for watching real, current footage before
+calling a fix closed -- this session is the clearest instance of that
+rule yet: the fix would have been called "KEEP" on template evidence
+alone.
+
+**Candidate directions for a future attempt, none tried yet:** (a) a
+feature that specifically looks for 9's tail stroke (a thin diagonal
+extending below and right of the loop) rather than absence-of-hole, so
+it can't be confused with "hole eroded by blur"; (b) requiring the
+tiebreak's own confidence signal to independently clear a bar before
+firing, so a low-quality crop that triggers on noise doesn't win over a
+raw match that's merely mediocre; (c) accepting `combo-9-vs-8-misread`
+as caught downstream the way `combo-8-clean-frame-overmatch` is
+(`MAX_PLAUSIBLE_COMBO_VALUE` and the reversion/group-size guards already
+catch some fraction of these), rather than fixing the digit read
+itself.
+
+## 2026-09-18 (a seventh session, continued) -- `combo-5-vs-6-misread`
+## pulled from `KNOWN_BUGS.md`: its only cited example predates
+## `MAX_PLAUSIBLE_COMBO_VALUE` and isn't a plausible real combo value
+
+The user (who knows this game's mechanics -- see `config.py`'s own
+comment: Mercenaries' combo counter can never exceed 150 in a real run)
+flagged that the bug's cited example, "true `884->885` detected as
+`884->886`" (t=37.0, video2), is itself impossible: 884 is nowhere near
+a plausible real combo value. Checked the chronology in this file: that
+finding (the "Re-review surfaces a second, distinct bug" entry, ~line
+507) predates `MAX_PLAUSIBLE_COMBO_VALUE`'s introduction (the later
+"Bug D fixed" entry) on the same day. At the time, nothing rejected an
+implausible combo reading, so a `884` (almost certainly itself a
+misread of something during "fast, chaotic combat," per that entry's
+own words -- not the true value) could still flow into `event_detector`
+unfiltered. Under current code, `read_combo` would reject a reading
+that high outright (`None`, not a wrong-but-plausible value), so this
+exact example can no longer even reproduce the way it's described.
+
+**Removed from `KNOWN_BUGS.md`, not moved to `FIXED_BUGS.md`** -- this
+isn't a confirmed fix, just a stale/invalid piece of evidence. The
+underlying "5 misread as 6" pattern may still be real, but needs a
+fresh real-footage instance with a plausible value (≤150) found under
+current code before it's worth tracking again.
+
+## 2026-09-18 (a seventh session, continued) -- a systematic crop-bleed
+## audit across every combo template, and the fixture alignment bug it
+## uncovered
+
+**Started from the user's own idea** for `combo-6-vs-0-tens-misread`:
+instead of another "8"-shape axis (waist-notch, base-widen, the reverted
+bottom-loop one), check two vertical columns positioned where a real
+"0"'s oval walls sit -- a genuine "0" has continuous ink top-to-bottom
+at both columns, "6" has a gap somewhere (its top is a single hook
+stroke, not a second wall). Probed against templates with columns
+anchored to each glyph's own hole/ink geometry (not a fixed crop
+fraction, learned from the `bottom_loop_closure_score` postmortem):
+clean "0"s scored a max gap of 0.054-0.081, but only one of the two "6"
+templates (`6/b`) was usable -- `6/a` gave a degenerate 1.000 gap that
+turned out to be a symptom of a much bigger, separate problem (below),
+not signal.
+
+**The user, comparing `6/a` and `6/b` side by side, spotted `6/a` looked
+structurally wrong, not just noisy.** Git-blame traced it: `6/a`,
+`4/a`, `8/a`, `9/a` are the original pre-multi-sample single templates,
+carried over unrenamed when the multi-sample architecture was
+introduced (`85186fa`) -- never actually replaced with real-footage
+curation the way this project's other digits were. `combo-template-
+defects` (KNOWN_BUGS.md) had already flagged these four with a left-
+edge crop-bleed artifact, but had never asked whether removing them was
+actually safe.
+
+**A systematic audit, extended per the user's request ("da uma olhada
+nos outros números também")**, ran `cv2.connectedComponentsWithStats`
+over every combo template, looking for a small blob disconnected from
+the glyph's own main shape and touching the left edge -- confirmed real
+bleed only on the same four (`4/a` 10-11px², `6/a` 45px², `8/a` 52px²,
+`9/a` 62px²). **A cruder first heuristic (ink touching x=0 + wide
+bounding box) also flagged `2/c`, `5/b`, `7/b`** -- the user caught this
+immediately ("7b não tem não kkkk"): `7/b`'s own "7" shape legitimately
+reaches the crop's left edge (a wide top bar), and `2/c`/`5/b`'s "blobs"
+were 1-3px noise specks. Connected-component isolation, not raw ink
+extent, is the test that actually distinguishes real bleed from a
+naturally wide glyph.
+
+**Removing the four defective samples outright, before curating
+replacements, made things measurably worse** -- 10 regression tests
+broke. Root-caused each one: raw matching's winner shifted to a
+*different* wrong digit, not toward the true one. `combo_8_real.png`
+(a confirmed real "8") started losing to "4" (0.73 vs. 0.59); the "2
+misread as 8" and "3 misread as 8" fixtures started losing to "3" and
+"0" respectively. `8/a`'s own bleed had apparently been supplying just
+enough extra correlation surface to keep it winning these three
+specific fixtures -- `combo-2-vs-8-misread` and
+`combo-3-vs-8-9-misread`'s own regression tests had been unknowingly
+depending on that defect's side effect to even reach their tiebreak
+code path (`match_digit` only applies `waist_notch_score`/
+`base_widen_score` when the raw winner is already "8" or "9"). Restored
+the three files from git immediately once this was clear.
+
+**Curated real-footage replacements for all four digits from the five
+source videos the user had by now downloaded** (same methodology as
+every prior curation round: scan for high raw-confidence occurrences,
+visually confirm each against the actual frame before keeping it, align
+new crops only against an already-trusted sample -- aligning against a
+*defective* one reproduces its defect, confirmed directly: the first
+extraction pass for "6" aligned against both `6/a` and `6/b`, and
+silently inherited `6/a`'s bleed into all five new samples until
+re-aligned against `6/b` alone). "6" and "4" and "9" were easy (44-77
+high-confidence hits per video for "4" alone). **"8" was not** --
+automated scanning down to confidence 0.55 across all 5 videos, every
+0.5s, found nothing usable (2 false positives that were really "4"/"5",
+one frame blown out by an in-game explosion flash, one a pre-gameplay
+loading screen). **The user supplied 8 approximate timestamps from
+memory** (including two ~80-second "combo stuck at 80" windows, one per
+video) and reacted "not rare at all kkkk" -- 6 of those panned out to
+real, clean, visually-confirmed "8" instances once the exact right
+second within each window was found. Net: `4/a`, `6/a`, `8/a`, `9/a`
+deleted; 4 gained 5 new samples, 6 gained 5, 8 gained 6, 9 gained 5 (+1
+more below).
+
+**A second, independent bug surfaced while investigating why
+`combo_8_real.png` still self-matched weakly (0.59) even after the
+real "8" backfill.** The user asked directly: "pode ser um problema de
+recorte? Ele tá bem pra direita comparando com os outros." Checked ink
+x-ranges: `combo_8_real.png` sat at x=[10,33] in its 34px-wide crop,
+every actual template at x=[5-6,29-30] -- a consistent ~4-6px rightward
+shift. Checked the other two related fixtures
+(`combo_2_real_misread_as_8.png`, `combo_3_real_misread_as_8.png`): same
+shift. All three were made by the same one-time manual process
+described earlier in this file ("recovered from a prior session's
+upscaled `tmp/` visualization by exact strided downsampling") -- a bug
+in that recovery step, confirmed **not** present in
+`config.COMBO_DIGIT_SLOTS`/`read_digit_slots` itself (every fresh
+real-footage sample curated this session went through that live
+production code path and landed consistently aligned with every
+pre-existing correct template). `8/a`'s own bleed, spanning almost the
+full crop width, had been wide enough to tolerate this shift too --
+masking both bugs from each other simultaneously. **Fix:** tested
+left-shifts 0-7px against each fixture's own known-true digit, took the
+shift that maximized its score: `combo_8_real.png` -4px (0.59->0.95),
+`combo_2_real_misread_as_8.png` -6px (0.51->0.96),
+`combo_3_real_misread_as_8.png` -5px (0.67->0.98). Visually confirmed
+each re-cropped fixture still looks like a clean, correctly-formed
+digit (no smearing from the shift).
+
+**End state confirms this was a real, not cosmetic, improvement**: raw
+`match_digit` with no tiebreak at all now correctly reads the "2" and
+"3" fixtures on its own -- `test_match_digit_without_tiebreak_misreads_
+the_real_{2,3}_as_8` renamed to `..._now_correctly_reads_the_real_{2,3}`
+and re-asserted, with comments explaining the premise changed for real
+reasons, not because the test was loosened. One more fallout found and
+fixed the same way: `combo_149_adjacent_digit_bleed_frame.png` (the
+`combo-label-margin-bleed` regression, a full real frame, not a hand-
+cropped fixture) started reading `140` instead of `149` once `9/a` was
+gone -- the frame's real "9" simply doesn't self-match any of the 5
+current real "9" samples well (~0.50 best), a same-shape-different-
+capture variance issue, not a bug in this session's work. Curated a 6th
+"9" sample directly from that exact frame's own ones-digit slot, which
+of course self-matches at 1.0 and fixed the test. Full suite: 117
+passed (same total as before this session -- composition improved, not
+padded).
+
+**Checked whether any of this incidentally fixes
+`combo-6-vs-0-tens-misread`'s cited instance (video1 t=252.4, true
+`064`)**: the single frame at t=252.400 itself now reads `064` correctly
+(0.821 confidence, was wrong on every frame in the old template set).
+**But the tick's 11-frame majority vote still fails** -- 4 of 11 frames
+now read `_84` (tens misread as "8"), only 1 reads the correct `_64`.
+One confusion axis (6-vs-0) genuinely closed; a different one (6-vs-8)
+takes its place in the vote. Left `combo-6-vs-0-tens-misread` OPEN in
+KNOWN_BUGS.md with this update -- not closing on a majority-vote-level
+regression that still fails, per this project's own standing discipline
+about not calling something fixed on partial evidence.
+
+**The user's own vertical-column "0"-wall idea was never implemented in
+code** -- deprioritized once the template-defect audit took over as the
+higher-value thread this session. Worth revisiting with the now much
+larger, bleed-free "6" and "0" sample sets if `combo-6-vs-0-tens-misread`
+gets picked up again.

@@ -119,6 +119,76 @@ values, no new low-confidence drops, across any video.
 - DECISIONS.md § "video5 id=6's overcount root-caused...", § "tried option
   2 (binarize...)"
 
+### `combo-template-defects`
+The user spotted (comparing `6/a` and `6/b` side by side) that `6/a`
+looked structurally off, not just noisy. Traced its git history: `6/a`,
+`4/a`, `8/a`, `9/a` are all the *original* single-sample templates from
+before the multi-sample architecture existed, simply renamed into the
+new `a.png` slot when that architecture was introduced — never replaced
+with real-footage curation the way `0/3/5/7` (first) and later
+`1/2/4/6/8/9`'s *other* samples were. A systematic audit (requested by
+the user: "olha os outros números também") of every combo-font template
+via `cv2.connectedComponentsWithStats` — flagging a small blob
+disconnected from the glyph's own main shape and touching the crop's
+left edge — confirmed real, substantial bleed only on those same four
+(`4/a` area 10-11px, `6/a` 45px, `8/a` 52px, `9/a` 62px). **A naive
+first pass (ink touching x=0 + wide bounding box) also flagged `2/c`,
+`5/b`, `7/b` — the user caught this too ("7b não tem não kkkk") and
+those turned out to be false positives**: `7/b`'s own glyph legitimately
+reaches the left edge (a wide top bar), and `2/c`/`5/b`'s "blobs" were
+1-3px noise specks, not another digit's ink. Connected-components,
+not raw ink-extent, is the reliable test.
+**Fix:** deleted `4/a`, `6/a`, `8/a`, `9/a`; backfilled all four digits
+with real-footage samples (5-6 each) curated from all 5 available source
+videos, one per video where practical, each visually confirmed against
+the actual frame (not just its crop) before being kept. "8" needed the
+user's help to find at all — automated scanning down to confidence 0.55
+across all 5 videos found nothing usable (2 false positives, one frame
+blown out by an in-game flash, one a pre-gameplay loading screen); the
+user supplied 8 approximate timestamps/windows from memory (including
+two ~80-second "combo stuck at 80" windows) and 6 of them panned out.
+**Removing the defective samples without this backfill made things
+worse, not neutral** (confirmed by trying it first): 10 existing
+regression tests broke, because raw matching's winner shifted to a
+*different* wrong digit (a real "8" fixture started losing to "4"; the
+"2 misread as 8" and "3 misread as 8" fixtures started losing to "3" and
+"0" respectively) — `8/a`'s own bleed had apparently been giving it just
+enough extra correlation surface to keep winning these specific
+fixtures, propping up `combo-2-vs-8-misread`/`combo-3-vs-8-9-misread`'s
+tests by accident. Always curate a replacement before deleting a
+"defective but load-bearing" sample, never delete-then-see.
+**A second, independent bug surfaced while chasing those 10 failures**
+(the user noticed `combo_8_real.png` looked shifted right compared to
+every template): three single-digit test fixtures
+(`combo_8_real.png`, `combo_2_real_misread_as_8.png`,
+`combo_3_real_misread_as_8.png`) were cropped 4-6px too far right,
+apparently by the one-time manual "upscale 10x → crop → downsample"
+recovery process used to make them in an earlier session (see
+`combo-3-vs-8-9-misread` above) — not a `read_digit_slots`/
+`config.COMBO_DIGIT_SLOTS` bug, which is unaffected (every fresh
+real-footage sample curated this session, extracted through the live
+production crop logic, aligned consistently with every pre-existing
+correct template). `8/a`'s own bleed had been wide enough to
+accidentally tolerate this shift too, masking it from both directions
+at once. **Fix:** re-cropped each fixture at the pixel shift that
+maximizes its own true digit's raw score (found by testing shifts 0-7):
+`combo_8_real.png` -4px (0.59→0.95), `combo_2_real_misread_as_8.png`
+-6px (0.51→0.96), `combo_3_real_misread_as_8.png` -5px (0.67→0.98).
+**Net result, all real improvements, not just fixture patches:** raw
+matching (no geometric tiebreak at all) now correctly reads the "2" and
+"3" fixtures on its own — `test_match_digit_without_tiebreak_*`
+renamed/updated in `test_hud_reader_base_widen.py` and
+`test_hud_reader_waist_notch.py` to assert the correct digit instead of
+the old misread, with comments explaining why the premise changed. Also
+fixed, as a side effect: `combo_149_adjacent_digit_bleed_frame.png`
+(the `combo-label-margin-bleed` regression test) started failing the
+same way (`9` losing to `0`) once `9/a` was removed — root-caused to the
+same "real 9, weak self-match" pattern, fixed by curating one more real
+"9" sample directly from that exact frame. Full suite: 117 tests green
+(was 117 before this session too — same count, healthier composition).
+- DECISIONS.md § "a systematic crop-bleed audit... and the fixture
+  alignment bug it uncovered"
+
 ### `combo-static-background-bleed` (the video1 t=62.2 "phantom event")
 A busy static background (a mossy rock wall texture behind the
 semi-transparent combo counter) bled into the digit search margin,

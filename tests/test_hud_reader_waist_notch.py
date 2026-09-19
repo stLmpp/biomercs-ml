@@ -15,13 +15,22 @@ def test_waist_notch_score_scores_a_real_8_below_the_threshold():
     assert hud_reader.waist_notch_score(crop) < config.WAIST_NOTCH_THREE_THRESHOLD
 
 
-def test_match_digit_without_tiebreak_misreads_the_real_3_as_8():
+def test_match_digit_without_tiebreak_now_correctly_reads_the_real_3():
+    # This fixture used to reproduce the raw 3-vs-8 misread on its own
+    # (hence its filename) -- it stopped doing so once two unrelated bugs
+    # in this session were fixed: the fixture itself was cropped 5px off
+    # from every template's own alignment (a bug in the one-time recovery
+    # process that made it, not in read_digit_slots), and `8/a` (the
+    # template that used to win here) had a real crop-bleed defect (see
+    # `combo-template-defects`) that got removed. The tiebreak below is
+    # still exercised and still holds -- this just confirms raw matching
+    # alone no longer needs it for this specific fixture.
     templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
     crop = hud_reader.load_image(THREE_MISREAD_AS_8_PATH)
 
     digit, _ = hud_reader.match_digit(crop, templates)
 
-    assert digit == "8"
+    assert digit == "3"
 
 
 def test_match_digit_waist_notch_tiebreak_fixes_the_real_3_misread_as_8():
@@ -42,20 +51,21 @@ def test_match_digit_waist_notch_tiebreak_does_not_flip_a_real_8():
     assert digit == "8"
 
 
-def test_read_digit_slots_without_tiebreak_still_misreads_the_real_3_as_8():
+def test_read_digit_slots_without_tiebreak_now_correctly_reads_the_real_3():
     # A single slot sized exactly to the crop leaves read_digit_slots'
     # own margin logic zero room to extend (see its px0/px1 clamping),
     # so this exercises the exact same tight-crop conditions as
-    # test_match_digit_without_tiebreak_misreads_the_real_3_as_8, but
-    # through read_digit_slots itself -- proving the parameter actually
-    # has to reach match_digit, not just that match_digit works alone.
+    # test_match_digit_without_tiebreak_now_correctly_reads_the_real_3,
+    # but through read_digit_slots itself -- proving the parameter
+    # actually has to reach match_digit, not just that match_digit works
+    # alone.
     templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
     crop = hud_reader.load_image(THREE_MISREAD_AS_8_PATH)
     h, w = crop.shape[:2]
 
     value, _ = hud_reader.read_digit_slots(crop, [(0, 0, w, h)], templates)
 
-    assert value == 8
+    assert value == 3
 
 
 def test_read_digit_slots_waist_notch_tiebreak_fixes_the_real_3_misread_as_8():

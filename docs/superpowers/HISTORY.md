@@ -16,6 +16,59 @@ the time) that the other three files don't repeat.
 
 ---
 
+## Status as of 2026-09-18 (a seventh session) — a reverted geometric
+## tiebreak attempt for `combo-9-vs-8-misread`; then a template-defect
+## audit (triggered by the user, extended by the user) that removed 4
+## defective combo digit templates, backfilled 22 real-footage samples
+## across all 5 source videos, and found/fixed a 3-fixture crop
+## alignment bug along the way
+
+**First half:** explored `bottom_loop_closure_score` (9's tail never
+closes into a second loop) as a third tiebreak for `combo-9-vs-8-misread`,
+per the user's own idea. Looked clean against templates and one real
+crop, but the user then downloaded all 5 source videos and a real A/B
+diff on video1 found it doesn't discriminate a real "9" at all — it
+fires on any digit (confirmed real `0`, `2`, `3`) whenever raw matching
+already mismatches it as "8" under real dark/blurry footage, because
+those same conditions erase the bottom hole the feature measures.
+Reverted entirely (code, tests, fixture). Full detail: DECISIONS.md
+§ "a third geometric tie-breaker... reverted...".
+
+**Second half, the more consequential one:** asked for the next
+digit-confusion bug, landed on `combo-6-vs-0-tens-misread`. The user
+compared `6/a`/`6/b` side by side and spotted `6/a` looked structurally
+wrong — traced it to being one of 4 original pre-multi-sample templates
+(`4/a`, `6/a`, `8/a`, `9/a`) never actually replaced with real-footage
+curation. A connected-components audit (extended across every digit at
+the user's request, who then caught false positives in a cruder first
+pass) confirmed real crop-bleed on exactly those 4. Removing them
+outright broke 10 tests — root cause: `8/a`'s own defect had been
+propping up `combo-2-vs-8-misread`/`combo-3-vs-8-9-misread`'s own
+regression tests as a side effect. Restored, then properly backfilled
+all 4 digits with 22 new real samples from the 5 source videos (the user
+directly supplied timestamps for "8", which automated scanning at any
+reasonable confidence had completely missed — "not rare at all kkkk").
+While chasing the remaining failures, the user asked "pode ser um
+problema de recorte?" about a fixture that looked shifted right — right
+again: 3 single-digit test fixtures had been mis-cropped 4-6px by an
+unrelated prior session's manual recovery process, re-cropped by
+maximizing each one's own true-digit score. End state: 117 tests green,
+3 of them updated because raw matching now correctly reads real "2"/"3"
+without needing the geometric tiebreak at all — a genuine improvement,
+not just a patched fixture. Bonus: `combo-6-vs-0-tens-misread`'s cited
+frame now reads correctly standalone, but the tick's majority vote still
+fails (now 6-vs-8, not 6-vs-0) — left OPEN. Full detail: DECISIONS.md
+§ "a systematic crop-bleed audit... and the fixture alignment bug it
+uncovered"; FIXED_BUGS.md § `combo-template-defects`.
+
+**Start here next session:** the user's own vertical-column "0"-wall
+idea for `combo-6-vs-0-tens-misread` was validated on templates but
+never implemented in code — worth revisiting now that "6"/"0" both have
+much larger, bleed-free sample sets. Separately, `combo-9-vs-8-misread`
+is still open and untried since the reverted attempt.
+
+---
+
 ## Status as of 2026-09-18 (a sixth session, continued) — the
 ## waist-notch tie-breaker **implemented for the combo font, TDD'd (110
 ## tests), A/B-verified, and now also user-reviewed: KEEP.** One new

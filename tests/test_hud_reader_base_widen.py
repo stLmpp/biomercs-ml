@@ -24,13 +24,22 @@ def test_base_widen_score_scores_a_real_3_below_the_threshold():
     assert hud_reader.base_widen_score(crop) < config.BASE_WIDEN_TWO_THRESHOLD
 
 
-def test_match_digit_without_tiebreak_misreads_the_real_2_as_8():
+def test_match_digit_without_tiebreak_now_correctly_reads_the_real_2():
+    # This fixture used to reproduce the raw 2-vs-8 misread on its own
+    # (hence its filename) -- it stopped doing so once two unrelated bugs
+    # in this session were fixed: the fixture itself was cropped 6px off
+    # from every template's own alignment (a bug in the one-time recovery
+    # process that made it, not in read_digit_slots), and `8/a` (the
+    # template that used to win here) had a real crop-bleed defect (see
+    # `combo-template-defects`) that got removed. The tiebreak below is
+    # still exercised and still holds -- this just confirms raw matching
+    # alone no longer needs it for this specific fixture.
     templates = hud_reader.load_digit_templates(config.COMBO_DIGITS_DIR)
     crop = hud_reader.load_image(TWO_MISREAD_AS_8_PATH)
 
     digit, _ = hud_reader.match_digit(crop, templates)
 
-    assert digit == "8"
+    assert digit == "2"
 
 
 def test_match_digit_waist_notch_tiebreak_fixes_the_real_2_misread_as_8():

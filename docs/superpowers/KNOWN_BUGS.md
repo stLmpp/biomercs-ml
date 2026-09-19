@@ -24,21 +24,30 @@ accuracy).
 **OPEN.** Smaller/rarer instances of the same family as
 `combo-2-vs-8-misread`: adding real "8" curation samples once broke a
 "149" read into "148"; a separate real case misread `119` as `118`
-(t=473.0).
+(t=473.0). **A geometric tiebreak attempt (`bottom_loop_closure_score`,
+9's tail never closing into a second loop) was tried and reverted** --
+real-footage A/B verification on video1 found it doesn't discriminate a
+real 9 at all; it fires on almost any real digit (confirmed real `0`,
+`2`, `3`) whenever raw matching already mismatches that digit as "8"
+under real degraded footage (dark lighting, motion blur), because those
+same conditions also erase/shrink the bottom hole this feature measures
+-- see DECISIONS.md § "a third geometric tie-breaker... reverted after
+real-footage verification found it doesn't hold".
 - DECISIONS.md § "video5 id=6's overcount root-caused...", lines ~1738-1745
 
-### `combo-5-vs-6-misread`
-**OPEN.** t=37.0: true `884→885` (group_size 1) detected as `884→886`
-(group_size 2). The correct `885` renders for exactly one frame as the
-counter's pop animation finishes, then immediately and persistently flips
-to the wrong `886`.
-- DECISIONS.md, lines ~576-580, 750-764
-
 ### `combo-6-vs-0-tens-misread`
-**OPEN.** video1 t=252.4, true `064` — tens digit "6" still misreads as
-"0" even after curation. Thin coverage: "6" has only 2 samples vs. 4-5 for
-the fully-curated 0/3/5/7.
-- DECISIONS.md, lines ~917-920
+**OPEN, partial improvement.** video1 t=252.4, true `064` — tens digit
+"6" used to misread as "0" on every frame in the tick's 11-frame vote
+burst. After removing `6/a` (see `combo-template-defects` in
+FIXED_BUGS.md) and adding 5 new real-footage "6" samples (one per
+video), the single frame at t=252.400 itself now reads `064` correctly
+(0.821 confidence). **But the tick's majority vote still fails** — 4 of
+11 frames in the burst now read `_84` (tens misread as "8", not "0"
+anymore) vs. only 1 reading the correct `_64`. Progress (one real
+confusion axis closed), not a fix (the vote still lands wrong, just via
+a different wrong digit).
+- DECISIONS.md § "a systematic crop-bleed audit... and the fixture
+  alignment bug it uncovered"
 
 ### `combo-8-clean-frame-overmatch`
 **UNCONFIRMED / possibly ACCEPTED.** t=124.0: a completely clean,
@@ -86,16 +95,14 @@ not just 3-vs-8/9.
 - DECISIONS.md § "the timer-cross-check idea investigated and found NOT
   independent..."
 
-### `combo-template-defects`
-**LATENT.** Visual audit found `digits_combo/0/e.png` is outright
-corrupted (not a real "0"), but scores low enough (0.30-0.34) to be
-currently harmless. `4/a`, `6/a`, `8/a`, `9/a` share a left-edge crop-bleed
-artifact (an adjacent digit leaking into the crop margin); `8/a`/`9/a`
-additionally have their internal holes blurred nearly shut. Confirmed
-**not** the cause of the 2/3/8/9 confusions above, but a separate latent
-gap. Reference: `tmp/combo_digit_templates_binarized_grid.png` (local
-only, gitignored).
-- DECISIONS.md § "tried option 2 (binarize before matching...)"
+### `combo-template-defects` (partially fixed, see FIXED_BUGS.md)
+**LATENT, residual.** `digits_combo/0/e.png` is still outright corrupted
+(not a real "0"), but scores low enough (0.30-0.34) to be currently
+harmless — left as-is. The left-edge crop-bleed defect on `4/a`, `6/a`,
+`8/a`, `9/a` is now fixed (removed + backfilled with real-footage
+samples); see `combo-template-defects` in FIXED_BUGS.md for that part.
+- DECISIONS.md § "a systematic crop-bleed audit... and the fixture
+  alignment bug it uncovered"
 
 ## Event detection / kill-grouping
 
