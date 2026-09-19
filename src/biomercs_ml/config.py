@@ -172,18 +172,32 @@ CLIP_AFTER_S = 2.0
 # guessing how to split the credit.
 PICKUP_EXCLUSION_WINDOW_S = 5.0
 
+# The +5s of a kill bonus does not land on the same tick as its "+05
+# sec." popup: real footage shows the timer jumping up to ~1s before the
+# popup appears (and ~0.6s after it starts). Timer readings closer than
+# this to a popup episode therefore can't be trusted as pre-/post-bonus.
+POPUP_TIMER_LEAD_S = 1.2
+
 # Consecutive "+05 sec." popup ticks closer than this belong to one popup
-# episode (one on-screen popup, however many kills it covers). Two ticks
-# is SAMPLE_INTERVAL_S * 2: it bridges a single tick whose popup read
-# failed, without joining two genuinely separate kills.
-POPUP_EPISODE_MAX_GAP_S = 0.5
+# episode. It is the timer lead: two popups nearer than that have jumps
+# that can't be told apart, so they're measured together (and the popup
+# detector also drops a tick now and then within one popup).
+POPUP_EPISODE_MAX_GAP_S = POPUP_TIMER_LEAD_S
 
 # How far before/after a popup episode its bonus is measured, as the
 # median of the decay-adjusted timer readings in that span. A median (not
 # the min/max event_detector's combo-pair logic uses) because single-tick
 # timer misreads (see DECISIONS.md, timer-noise-session-fragmentation)
-# would otherwise inflate the +5s-per-kill count.
-POPUP_TIMER_WINDOW_S = 1.5
+# would otherwise inflate the +5s-per-kill count. Wide, because the combo
+# HUD (and with it the sampled tick) is often hidden for seconds around a
+# kill, and the timer decays predictably (1s/s) with no other bonus
+# possible between two popups.
+POPUP_TIMER_WINDOW_S = 4.0
+
+# A popup episode belongs to a combo-rise pair if it starts within this
+# long of the pair's ends -- on either side, since the popup detector can
+# fire a tick or two after the combo tick that already shows the kill.
+POPUP_COMBO_ATTACH_LAG_S = 1.0
 
 # The combo counter only ever increases during a session (it can drop
 # to near zero on a rare genuine combo break, but never dips by a small

@@ -224,17 +224,16 @@ def _bonus_episode_group(
     end_s = episode[-1].timestamp_s
     if _pickup_nearby(all_samples, start_s) or _pickup_nearby(all_samples, end_s):
         return None
-    # The timer windows must not reach into a neighboring episode, or its
-    # own +5s jump would be counted as this episode's.
+    # The timer windows must not reach into a neighboring episode (or its
+    # lead), or its own +5s jump would be counted as this episode's.
     before = [
         s for s in all_samples
-        if max(previous_end_s, start_s - config.POPUP_TIMER_WINDOW_S) <= s.timestamp_s < start_s
+        if max(previous_end_s, start_s - config.POPUP_TIMER_WINDOW_S) <= s.timestamp_s <= start_s - config.POPUP_TIMER_LEAD_S
         and s.timer_value_s is not None
     ]
     after = [
         s for s in all_samples
-        if end_s <= s.timestamp_s <= end_s + config.POPUP_TIMER_WINDOW_S
-        and s.timestamp_s < next_start_s
+        if end_s <= s.timestamp_s <= min(end_s + config.POPUP_TIMER_WINDOW_S, next_start_s - config.POPUP_TIMER_LEAD_S)
         and s.timer_value_s is not None
     ]
     if not before or not after:
@@ -285,7 +284,8 @@ def detect_popup_kill_groups(
     unattached = bonus_groups
     for combo_group in combo_groups:
         window_start_s = combo_group.timestamp_s - combo_group.elapsed_s - config.TIMER_DELTA_SEARCH_WINDOW_S
-        attached = [b for b in unattached if window_start_s <= b[0].timestamp_s <= combo_group.timestamp_s]
+        window_end_s = combo_group.timestamp_s + config.POPUP_COMBO_ATTACH_LAG_S
+        attached = [b for b in unattached if window_start_s <= b[0].timestamp_s <= window_end_s]
         if not attached:
             groups.append(combo_group)
             continue

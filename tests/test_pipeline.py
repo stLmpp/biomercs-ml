@@ -62,13 +62,14 @@ def test_label_kill_groups_ignores_samples_whose_combo_is_unreadable():
 
 
 def test_label_kill_groups_labels_a_popup_bonus_kill_even_when_combo_is_never_readable():
+    ticks = [round(i * 0.2, 1) for i in range(31)]
     samples = [
-        HudSample(t, 0, 100.0 - t + (5.0 if t >= 1.0 else 0.0), None, 0.9, bonus_popup=1.0 <= t <= 1.2)
-        for t in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0)
+        HudSample(t, 0, 100.0 - t + (5.0 if t >= 3.0 else 0.0), None, 0.9, bonus_popup=3.0 <= t <= 3.2)
+        for t in ticks
     ]
 
     labeled = pipeline.label_kill_groups(samples)
 
     assert [(group.timestamp_s, label.kind, label.n_bonus) for group, label in labeled] == [
-        (1.0, "bonus_kill", 1)
+        (3.0, "bonus_kill", 1)
     ]
