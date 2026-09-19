@@ -2755,3 +2755,15 @@ MUST guard its entry with `if __name__ == "__main__":` -- otherwise each
 worker re-runs the script and the pool dies with `BrokenProcessPool`
 (the log shows "=== video 1/5 ===" repeated). `python -c` snippets don't hit
 this.
+
+### Ninth session: user review of the new clips (video4, 20 clips)
+
+**14 correct / 6 wrong (70%)** -- vs 3/16 (19%) in round 1 and 5/17 (29%) in
+round 2 on the old detector (different clip sets, so indicative, not a strict
+A/B). All 20 reviewed clips were labeled `bonus_kill`. The 6 wrong: 5 are
+bonus **undercounts** (t=320.9 1 vs 2; 460.5 1 vs 2 + 1 bullet; 522.5 1 vs 2;
+539.5 1 vs 3; 636.2 1 bonus + 1 bullet), 1 is an overcount (511.9: 3 vs 2);
+2 of the 6 also lost a bullet kill (kind wrong). Same weakness the benchmark
+showed: simultaneous / clustered multi-kills and bullets. Answers live in
+`tmp\biomercs-popup-run4\manifest.sqlite` (`review_*` columns); runs 1, 2,
+3, 5 are still unreviewed.

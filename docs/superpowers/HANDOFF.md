@@ -84,7 +84,9 @@ DECISIONS.md § "2026-09-19 (a ninth session)".
 - Real-footage A/B on all 5 videos DONE (`tmp\biomercs-popup-run{,2,3,4,5}`,
   ~450s): clips 36 -> 350 (63-79 per video), labeled kills 102-138 per
   video (~150 real; bar >=140), but ~all are `bonus_kill` -- **bullet kills
-  are ~absent (1/video)**. Not yet reviewed by the user. Details:
+  are ~absent (1/video)**. User reviewed 20 video4 clips: **14 correct / 6
+  wrong (70%)**, errors mostly bonus undercounts on multi-kills (runs 1,2,3,5
+  still unreviewed). Details:
   DECISIONS.md § "Ninth session: A/B on real footage". Windows: any script
   using the process pool needs an `if __name__ == "__main__":` guard.
 
