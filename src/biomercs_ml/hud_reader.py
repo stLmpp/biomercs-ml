@@ -50,6 +50,42 @@ def waist_notch_score(crop: np.ndarray) -> float:
     return float(np.mean(middle) - np.mean(top_and_bottom))
 
 
+def base_widen_score(crop: np.ndarray) -> float:
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    binary = cv2.threshold(hsv[:, :, 2], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    width = binary.shape[1]
+
+    def row_span(row: int) -> tuple[int, int] | None:
+        ink = np.where(binary[row] > 0)[0]
+        if len(ink) == 0:
+            return None
+        return int(ink[0]), int(ink[-1])
+
+    spans = [row_span(row) for row in range(binary.shape[0])]
+    # A row spanning edge-to-edge is a HUD border line bleeding into the
+    # margin read_digit_slots adds (config.DIGIT_SEARCH_MARGIN_PX), not
+    # part of the glyph -- exclude it, or it would stretch the ink
+    # bounding box below back out to the crop's raw (padded) shape.
+    glyph_rows = [i for i, s in enumerate(spans) if s is not None and (s[1] - s[0] + 1) < width - 1]
+    if not glyph_rows:
+        return 0.0
+    glyph_rows_set = set(glyph_rows)
+
+    ink_top, ink_bottom = glyph_rows[0], glyph_rows[-1]
+    ink_h = ink_bottom - ink_top + 1
+    taper_band = range(ink_top + int(0.5 * ink_h), ink_top + int(0.85 * ink_h))
+    base_band = range(ink_top + int(0.85 * ink_h), ink_bottom + 1)
+
+    def rightmost_ink_positions(rows: range) -> list[int]:
+        return [spans[row][1] for row in rows if row in glyph_rows_set]
+
+    taper = rightmost_ink_positions(taper_band)
+    base = rightmost_ink_positions(base_band)
+    if not taper or not base:
+        return 0.0
+    return float(np.mean(base) - np.min(taper))
+
+
 def match_digit(
     crop: np.ndarray,
     templates: dict[str, list[np.ndarray]],
@@ -88,6 +124,15 @@ def match_digit(
     if apply_waist_notch_tiebreak and best_digit in ("8", "9") and "3" in per_digit_best_score:
         if waist_notch_score(crop) > config.WAIST_NOTCH_THREE_THRESHOLD:
             return "3", per_digit_best_score["3"]
+
+    # Same family, different axis: combo-font "2" structurally
+    # over-matches "8"/"9" too (see docs/superpowers/KNOWN_BUGS.md,
+    # `combo-2-vs-8-misread`) -- base_widen_score's rightmost-ink jump
+    # breaks this tie the way waist_notch_score breaks the "3" one
+    # above. Same opt-in guard applies: proven only for the combo font.
+    if apply_waist_notch_tiebreak and best_digit in ("8", "9") and "2" in per_digit_best_score:
+        if base_widen_score(crop) > config.BASE_WIDEN_TWO_THRESHOLD:
+            return "2", per_digit_best_score["2"]
 
     return best_digit, best_score
 

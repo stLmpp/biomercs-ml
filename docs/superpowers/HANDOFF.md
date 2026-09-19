@@ -4,7 +4,7 @@ Paste this whole file as your first message in a new session to continue.
 It's short on purpose — read the other docs only when you need their
 detail:
 - **`KNOWN_BUGS.md`** — open issues, one slug each (e.g.
-  `combo-2-vs-8-misread`). Check here before starting any investigation.
+  `combo-9-vs-8-misread`). Check here before starting any investigation.
 - **`FIXED_BUGS.md`** — resolved issues, same slug convention. Check here
   before re-attempting something.
 - **`DECISIONS.md`** — full technical reasoning/evidence behind every fix
@@ -34,30 +34,37 @@ Read before touching `hud_reader.py`/`event_detector.py`:
 2. `AGENTS.md` — Python/coding conventions for this repo.
 3. `KNOWN_BUGS.md` — don't re-investigate something already tracked.
 
-## Current status (as of 2026-09-18, a sixth session)
+## Current status (as of 2026-09-18, a seventh session)
 
 The combo font's `3`-vs-`8`/`9` misread is **fixed** (`combo-3-vs-8-9-misread`
 in FIXED_BUGS.md — a geometric "waist notch" tie-breaker, TDD'd, 110
 tests, verified via full real-footage A/B diff + user manual review, kept).
+`combo-2-vs-8-misread` — the project's single biggest confirmed accuracy
+driver, 4 prior failed fix attempts — is now also **fixed**
+(`hud_reader.base_widen_score`, a second geometric tie-breaker on a
+different axis than the "3" one: rightmost-ink jump back out to full
+width just above the base bar. See FIXED_BUGS.md). Verified via a full
+real-footage A/B diff across all five videos: 93% of all raw combo-tick
+changes were exactly the target `_8 -> _2` pattern, manually confirmed
+correct against several actual video frames. 117 tests passing.
 The timer font's own version of the same confusion
 (`timer-3-vs-8-9-misread`) is **still open** — the same fix doesn't
 transfer there (see KNOWN_BUGS.md for why).
 
-**Start here next session** — two candidate leads, no strong opinion
-recorded yet, worth a short discussion before picking:
-1. **`combo-2-vs-8-misread`** (KNOWN_BUGS.md) — the project's single
-   biggest confirmed accuracy driver, still open, 4 failed fix attempts.
-   Fresh data point: video 1, t=520.2, `mixed(1,6)` vs true `(1,0)`. A
-   promising untested lead: extend the already-built
-   `apply_waist_notch_tiebreak` to also redirect toward "2" (not just
-   "3") when the winner is "8"/"9" — the feature's own data shows real
-   "2" clears the same separating margin, just not yet wired in.
-2. **`timer-3-vs-8-9-misread`** (KNOWN_BUGS.md) — needs a genuinely
+**Start here next session:**
+1. **`fabricated-bullet-count-on-bonus-kill`** (KNOWN_BUGS.md) — now that
+   `combo-2-vs-8-misread` (its main known driver) is fixed, a fresh
+   review round would confirm how much it actually improved and whether
+   a smaller remaining driver still shows up.
+2. **`combo-9-vs-8-misread`** (KNOWN_BUGS.md) — same family, smaller/rarer
+   instances, still open; not addressed by either geometric tie-breaker
+   so far.
+3. **`timer-3-vs-8-9-misread`** (KNOWN_BUGS.md) — needs a genuinely
    different approach (stroke-width profiling, Hu-moment contours, a
    small trained classifier), since the waist-notch geometry doesn't
    generalize to this font.
 
-Full test suite: `uv run pytest -v` — should be 110 passing. Run it first
+Full test suite: `uv run pytest -v` — should be 117 passing. Run it first
 thing to confirm nothing's broken.
 
 ## Ephemeral files — will NOT exist in a new session

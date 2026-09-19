@@ -192,6 +192,21 @@ COMBO_REVERSION_CHECK_WINDOW_S = 6.0
 # apply_waist_notch_tiebreak for timer/popup digit reading.
 WAIST_NOTCH_THREE_THRESHOLD = 5.0
 
+# A different digit-shaped concavity from the one above: "2"'s diagonal
+# stroke pulls the *rightmost* ink column inward just above the base
+# bar, which then snaps back out to full width (see
+# hud_reader.base_widen_score -- rightmost-ink column, base-band average
+# minus taper-band minimum, bands relative to the glyph's own ink
+# bounding box so read_digit_slots' margin padding doesn't dilute them).
+# A real "2" has this jump (a positive score); every other combo-font
+# digit doesn't (near-zero or negative). Validated against every
+# combo-font template (real "2" scored 11.0-14.5, every other digit
+# -4.7-2.9) and real-footage crops, including through a full
+# read_digit_slots margin-padded crop (real "2" scored 13.3-13.5, real
+# "8"/"3"/"9" scored -2.0-1.0). This threshold sits well below that gap,
+# matching WAIST_NOTCH_THREE_THRESHOLD's scale.
+BASE_WIDEN_TWO_THRESHOLD = 5.0
+
 # The combo counter's roll/pop animation takes ~350ms for a single kill
 # but up to ~2s for a fast multi-kill chain (real footage: video 2,
 # t=122.0), while the timer jumps in a single frame -- so the sample

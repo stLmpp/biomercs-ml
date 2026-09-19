@@ -20,25 +20,6 @@ accuracy).
 
 ## Digit-matching / templates
 
-### `combo-2-vs-8-misread` ★
-**OPEN.** Combo's raw-pixel matcher confuses a real "2" for "8" — this is
-the project's single biggest confirmed accuracy driver. video5 `id=6`
-(t=576.0): combo genuinely went `111→112` (one bonus kill, confirmed by an
-on-screen "+05 sec." popup) but read as `118` for ~2.5s straight. Since
-`n_bullet = group_size - n_bonus` is an unverified remainder, this one
-misread alone explains most of `fabricated-bullet-count-on-bonus-kill`.
-**Four independent fix attempts all failed** (raw-BGR add/remove samples,
-HSV-Value+Otsu binarize + re-curation, binarize + 4x upscale) — conclusion:
-digit "8"'s shape structurally overlaps "2"/"3"/"9" under raw-pixel
-correlation at 34×46px, not a template-quality gap. **Not covered by the
-`combo-3-vs-8-9-misread` fix** (waist-notch only redirects toward "3").
-Promising untested lead: the waist-notch feature's own data shows real "2"
-also clears the "8"/"9" ceiling (6.36 real / 5.7-7.4 templates vs. 8/9's
-max ~2.92) — extending `apply_waist_notch_tiebreak` to also check "2", not
-just "3", is a plausible next step, not yet tried.
-- DECISIONS.md § "video5 id=6's overcount root-caused...", § "tried option
-  2 (binarize...)"
-
 ### `combo-9-vs-8-misread`
 **OPEN.** Smaller/rarer instances of the same family as
 `combo-2-vs-8-misread`: adding real "8" curation samples once broke a
@@ -125,8 +106,9 @@ remainder. Across every review round in the project (23-clip statistical
 baseline), 14/15 wrong clips had true `n_bullet=0` — a real bonus kill
 getting a fabricated bullet count is the dominant error class. Several
 past contributors are now fixed (`bug-a-timer-delta-desync`,
-`group-size-overestimation-anchors` in FIXED_BUGS.md); the main remaining
-driver is `combo-2-vs-8-misread`.
+`group-size-overestimation-anchors`, `combo-2-vs-8-misread` in
+FIXED_BUGS.md); needs a fresh review round to confirm whether a smaller
+remaining driver still shows up now that `combo-2-vs-8-misread` is fixed.
 - DECISIONS.md § "Re-review surfaces a second, distinct bug...", § "the
   timer-cross-check idea investigated..." (23-clip baseline table)
 

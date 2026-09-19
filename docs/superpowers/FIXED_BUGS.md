@@ -71,11 +71,53 @@ KNOWN_BUGS.md — doesn't transfer to that font). TDD'd with real footage
 crops, 110 tests. Verified via full real-footage A/B diff + user manual
 review on video 1: fixed a known phantom (`combo-static-background-bleed`
 below) and correctly split a previously-merged kill pair in a
-known-chaotic stretch. **Does not cover `combo-2-vs-8-misread`** (still
-open, see KNOWN_BUGS.md).
+known-chaotic stretch. **Does not cover `combo-2-vs-8-misread`** (fixed
+separately below).
 - DECISIONS.md § "a new, promising lead found (a geometric 'waist notch'
   feature...)", § "the waist-notch tie-breaker implemented for the combo
   font..."
+
+### `combo-2-vs-8-misread` ★
+The project's single biggest confirmed accuracy driver. video5 `id=6`
+(t=576.0): combo genuinely went `111→112` (one bonus kill, confirmed by
+an on-screen "+05 sec." popup) but read as `118` for ~2.5s straight.
+Since `n_bullet = group_size - n_bonus` is an unverified remainder, this
+one misread alone explained most of `fabricated-bullet-count-on-bonus-kill`.
+Four earlier independent fix attempts failed (raw-BGR add/remove samples,
+HSV-Value+Otsu binarize + re-curation, binarize + 4x upscale) —
+conclusion: digit "8"'s shape structurally overlaps "2"/"3"/"9" under
+raw-pixel correlation at 34×46px, not a template-quality gap. **Not
+covered by `combo-3-vs-8-9-misread`'s fix** (waist-notch only redirects
+toward "3") — "2"'s concavity sits on a different axis from "3"'s: the
+diagonal stroke pulls the *rightmost* ink column in just above the base
+bar, which then snaps back out to full width, vs. "3"'s left-side waist
+notch.
+**Fix:** `hud_reader.base_widen_score` (rightmost-ink column, HSV-Value
++Otsu binarized, bands relative to the glyph's own ink bounding box —
+excluding any row that spans edge-to-edge, since `read_digit_slots`'
+margin padding can pull in a HUD border line) as a second **scoped**
+tie-breaker alongside `waist_notch_score` in `match_digit(...,
+apply_waist_notch_tiebreak=True)` — only fires when the raw winner is "8"
+or "9". Validated against every combo-font template (real "2" scored
+11.0-14.5, every other digit -4.7-2.9) and real-footage crops, including
+through a full `read_digit_slots` margin-padded crop (real "2" scored
+13.3-13.5, real "8"/"3"/"9" scored -2.0-1.0). TDD'd
+(`tests/test_hud_reader_base_widen.py`), including a `read_combo`
+regression test on the real video5 frame that fixes `112` misread as
+`118`. **Verified via a full real-footage A/B diff across all five
+videos** (stash/run/restore, `sample_video` re-run before/after on each):
+93% of all 279 raw combo-tick changes were exactly the target `_8 -> _2`
+pattern (e.g. `138->132` x106, `118->112` x72, `148->142` x68), clustered
+in long session-consistent bursts, not isolated flickers. Manually
+confirmed against the actual video frames (not just crops) for four
+distinct changes across three videos, including the original video5
+t=576.0 instance — every one showed the *fixed* reading was the visibly
+correct on-screen value. One rare tens-digit case (video2 t=479.2,
+`133->123`) turned out to be a bonus fix: the old waist-notch check had
+been misfiring "3" over the true "2" there too. No new implausible
+values, no new low-confidence drops, across any video.
+- DECISIONS.md § "video5 id=6's overcount root-caused...", § "tried option
+  2 (binarize...)"
 
 ### `combo-static-background-bleed` (the video1 t=62.2 "phantom event")
 A busy static background (a mossy rock wall texture behind the
