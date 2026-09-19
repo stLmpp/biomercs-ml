@@ -2669,3 +2669,59 @@ labeled `(2b,2bl)` vs 2 real bonuses.
 Expected ceiling from popup alone ~73% recall (36/49 kills are bonus);
 bullets (13/49) are the hard part. Acceptance: benchmark first, then A/B on
 real footage across all 5 videos before keeping the change.
+
+### Ninth session: what was built and measured (popup-driven detection)
+
+**Implemented (all TDD, 165 tests):** `HudSample.bonus_popup`;
+`event_detector.detect_popup_kill_groups` (one group per popup episode; the
+old combo-pair `detect_kill_groups` is kept as the fallback for kills no popup
+explains); `pipeline.label_kill_groups` now uses it; `_assign_session_ids`
+keeps ticks with an unreadable combo; `_sample_range` keeps a tick whose combo
+label is hidden but whose popup label is visible.
+
+**Benchmark progression (video4 t=480-650, 49 kills; clips / recall /
+exact-count accuracy):**
+
+| step | clips | recall | count acc |
+|---|---|---|---|
+| baseline (combo-pair only) | 9 | 17/49 (34.7%) | 0/9 |
+| popup episodes, min/max timer window | 18 | 26/49 (53.1%) | 4/18 |
+| median timer windows | 21 | 34/49 (69.4%) | 8/21 |
+| + timer lead (jump lands up to ~1s BEFORE popup), wide windows, merge episodes < lead | 24 | 37/49 (75.5%) | 10/24 |
+| + drop residual "bullet" invented from combo rise | 24 | 37/49 (75.5%) | 13/24 |
+| + popup-only ticks (combo label hidden) | 24 | 37/49 (75.5%) | 13/24 |
+
+Precision stayed 100% throughout (every clip contains a real kill).
+
+**Findings worth keeping:**
+- The old "keep only ticks with readable timer AND combo" filter threw away
+  half the popup signal: on the raw ticks the popup gives 28 episodes /
+  25-of-27 truth bonus events / 0 orphans; after the filter only 16 / 15.
+- The timer's +5s does NOT land on the popup's tick: it can precede the
+  popup by ~1s (real: 583->588 at 528.1, popup 529.1) or follow its onset by
+  ~0.6s. Measuring the jump just around the popup (min/max over 3s) counts
+  neighbours' jumps and single-tick misreads (inflated counts, e.g. 4 vs 1).
+  Fix: median of decay-adjusted readings in a wide pre-window (ending
+  `POPUP_TIMER_LEAD_S` before the popup) and post-window (bounded by the
+  next episode), and merge episodes closer than the lead.
+- Combo pair boundaries do not align with popups (a popup can be claimed by
+  the neighbouring pair), so "combo rise minus bonuses = bullets" fabricated
+  bullets (`(2b,2bu)` vs truth 2 bonus). Removed; popup groups stand alone.
+  Consequence: a simultaneous bonus+bullet kill loses its bullet count.
+- The combo HUD (hence a sampled tick) is hidden for seconds around kills;
+  only ~4 extra ticks came from the popup-only rule on this window, so most
+  remaining misses are NOT unsampled popups.
+
+**Tried and rejected (do not retry blindly):** episode gap 0.8/1.0/1.4s
+(no gain, worse count); attach lag 3.0s (worse); dropping combo groups that
+have a timer jump but no popup (count 54%->68% but recall 75.5%->61.2% --
+kept them with `UNCORROBORATED_BONUS_CONFIDENCE_FACTOR` instead); anchoring
+the clip at the episode midpoint instead of onset (+1 count, same recall,
+too window-specific).
+
+**Where the remaining ~25% of kills go (video4 window):** 6 of the 12
+uncovered kills are bullets (no popup; only the sparse combo can see them);
+the bonus ones left are episodes whose timer readings are missing/garbage
+(569.0, 606.6 have no valid pre-window ticks) plus long clusters (3+ kills
+over ~4s) that one 4s clip cannot cover. Count accuracy 54% is dominated by
+clustered multi-kills and merged episodes.
