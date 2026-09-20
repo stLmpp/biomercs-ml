@@ -1,7 +1,7 @@
 # Kill Detector (trained video model) — Design
 
 **Date:** 2026-09-19
-**Status:** Draft, awaiting author review
+**Status:** Approved for planning
 
 ## Context
 
