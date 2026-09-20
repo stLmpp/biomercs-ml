@@ -125,6 +125,21 @@ replaced by two heads: `n_bonus` in {0, 1, 2, 3+} and `n_bullet` in
 {0, 1, 2, 3+}. "No kill" is (0, 0); "mixed" is derived (both > 0), not a
 class.
 
+### Alternative backbone: X-CLIP (fallback, not the first attempt)
+
+`r2plus1d_18` is pretrained on Kinetics-400 (real-world video), so the domain
+gap to game footage is a real risk. The nearest evidence found in the
+literature is a fine-tuned **X-CLIP** (video model built on CLIP, whose
+web-scale image-text pretraining includes game screenshots) detecting events
+in unseen first-person-shooter gameplay with >90% accuracy
+([Gameplay Highlights Generation](https://arxiv.org/html/2505.07721v1)). No
+pretrained model specific to RE5 or third-person shooters was found. If
+`r2plus1d_18` underperforms on the held-out block, X-CLIP (via Hugging Face
+`transformers`) is the next backbone to try, behind the same `model` module
+interface, same windows, same cache. **Unverified:** `transformers` under
+PyTorch-ROCm on Windows has not been tested; run a spike (load the model,
+one fp16 forward/backward on the GPU) before committing to it.
+
 ## Training
 
 - Cross-entropy on both heads. Empty windows dominate, so positives are
@@ -197,6 +212,8 @@ tests.
   freezing, augmentation, leave-one-video-out, and the option to fall back to a
   frozen-feature + temporal-head model (same cache, same windows).
 - **Domain gap:** Kinetics pretraining is real-world video, not game footage.
+  Mitigation: the X-CLIP alternative backbone above, and the frozen-feature +
+  temporal-head fallback.
 - **Noisy evaluation:** one 49-kill test window. Mitigation: rotate the test
   block as annotation grows.
 - **Window boundaries:** a kill near the edge of the 2s core is ambiguous;
