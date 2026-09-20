@@ -2767,3 +2767,45 @@ bonus **undercounts** (t=320.9 1 vs 2; 460.5 1 vs 2 + 1 bullet; 522.5 1 vs 2;
 showed: simultaneous / clustered multi-kills and bullets. Answers live in
 `tmp\biomercs-popup-run4\manifest.sqlite` (`review_*` columns); runs 1, 2,
 3, 5 are still unreviewed.
+
+## 2026-09-19 (ninth session, cont.) -- ML migration: environment spike
+
+**Context:** the user decided (after the popup-driven OCR attempt reached
+70% review accuracy on bonuses but ~no bullet kills) to stop HUD/OCR work
+and migrate to a real trained model with a human-feedback loop (their review
+as the signal; "reinforcement" = learn from corrections / active learning,
+not classical RL). Design brainstorm in progress; first fork still open: what
+the model outputs (temporal kill detector vs 4s-clip classifier vs HUD-only
+CNN).
+
+**Spike (throwaway, `tmp\spike-rocm`, `tmp\spike_*.py`, gitignored):
+PyTorch-ROCm works natively on this Windows machine.** Hardware: RX 9070 XT
+(gfx1201, 15.9 GiB VRAM; Windows' `AdapterRAM` wrongly says 4 GB), Ryzen 7
+9700X, 31 GB RAM. The Ryzen iGPU is NOT visible to torch (device_count == 1),
+so no device-selection worry.
+
+Install that worked (99s, Python 3.12 only -- wheels are cp312; not on
+PyPI, from AMD's repo; per rocm.docs.amd.com Windows compatibility):
+```
+uv venv <dir> --python 3.12
+uv pip install --python <dir>\Scripts\python.exe --no-cache ^
+  https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl ^
+  https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl ^
+  https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl ^
+  https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm-7.2.1.tar.gz ^
+  https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl ^
+  https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
+```
+Result: `torch 2.9.1+rocm7.2.1`, `cuda.is_available() == True`. matmul 4096^2:
+**15.6 TFLOPS fp32, 127.8 TFLOPS fp16** on GPU vs 0.05 fp32 on the CPU.
+Small 224px CNN training: **GPU fp32 ~840 img/s, GPU fp16 autocast ~1820
+img/s, CPU fp32 ~112 img/s.** (A first fp16 reading of 103 img/s was a
+warmup artifact -- kernels compiled inside the timed region; always warm up
+under the same autocast context before timing.)
+
+**Constraints for the real setup:** Windows ROCm = PyTorch only (no
+TensorFlow/JAX/ONNX-ROCm/vLLM); full ROCm stack unsupported; wheels need
+`[tool.uv.sources]`-style direct URLs and a Python 3.12 pin (uv also has
+3.14 installed); keep them in an optional dependency group so other
+machines (the old Mac) still resolve. CPU fallback stays viable for tiny
+models (~7x slower than GPU on the test CNN).
